@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- ハンズオン全体の構成図（README の冒頭・記事の「ハンズオンはこちら！」）。
+     左: あなたが AWS CloudShell で実行するコマンドと、その宛先。右: 東京リージョンで使う AWS のリソース。
+     根拠:
+     - aws s3 cp で app.zip（Dockerfile と server.py）を S3 にアップロードする（公式チュートリアル Create your first Lambda MicroVM）
+     - aws lambda-microvms の API: CreateMicrovmImage・RunMicrovm・CreateMicrovmAuthToken・SuspendMicrovm・TerminateMicrovm
+       （botocore lambda-microvms/2025-09-09/service-2.json）。手順の番号は設計書 v3 の README の章立て
+     - イメージの作成時、Lambda はビルド用ロールで S3 から zip を読み込み、ビルドのログを書く（CreateMicrovmImageRequest.buildRoleArn、docs microvms-security）
+     - MicroVM の実行時、Lambda は実行用ロールで実行のログを書く（RunMicrovmRequest.executionRoleArn、docs microvms-monitoring）
+       2 つのロールの信頼ポリシーのプリンシパルは lambda.amazonaws.com（hands-on/setup.sh）。そのため「Lambda が引き受ける」と書く
+       ログの線は、ビルドと実行の両方のログを表すため、MicroVM の箱ではなく AWS Lambda MicroVMs の枠から引く
+     - MicroVM はイメージのスナップショットから起動する（docs microvms-how-it-works）
+     - MicroVM ごとに HTTPS のエンドポイントがあり、リクエストには X-aws-proxy-auth の認証トークンが必要
+       （RunMicrovmResponse.endpoint、CreateMicrovmAuthTokenResponse、docs microvms-launching）
+     - IAM はグローバルなサービスのため、ロールはリージョンの枠の外、AWS Cloud の枠の中に置く
+     - 左の 4 つの箱は「何をするか」と「実行するコマンド」。線の上の「手順 N」は README の手順の番号
+     - Amazon Bedrock は手順 7 の sandbox.py だけが呼ぶ（hands-on/sandbox.py の ask_ai、モデル amazon.nova-2-lite-v1:0）
+     線はすべて水平か垂直。各ポートの箱と宛先の中心の高さ、S3・イメージ・MicroVM・ログの中心の横位置をそろえている -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 778px; }
+
+  /* 左: あなたの操作（灰色の点線） */
+  .lane.you { left: 0; top: 0; width: 232px; height: 778px; }
+  .cs { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 900; }
+  .cs img { width: 36px; height: 36px; }
+  .cs-sub { position: absolute; left: 12px; top: 54px; font-size: 16px; font-weight: 500; }
+  .port { position: absolute; left: 10px; width: 212px; height: 62px; border: 2px solid var(--ink); background: #fff; padding: 5px 8px; }
+  .port b { display: block; font-size: 17px; font-weight: 900; line-height: 1.35; white-space: nowrap; }
+  .port code { display: block; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1.45; white-space: nowrap; }
+
+  /* 右: AWS の枠 */
+  .grp { position: absolute; border: 2px solid #242f3e; }
+  .grp.region { border: 2px dashed #00a4a6; }
+  .grp.svc { border: 2px solid var(--ink); }
+  .grp > .gl { position: absolute; left: -2px; top: -2px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .grp > .gl img { width: 32px; height: 32px; }
+  .grp > .gl .en { font-family: var(--font-mono); font-weight: 800; font-size: 15px; letter-spacing: .04em; }
+  .grp > .gl .ja { font-size: 16px; font-weight: 900; }
+  .grp > .gl .code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; color: var(--grey); }
+
+  .vm { position: absolute; border: 3px solid var(--ink); background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .vm b { font-size: 18px; font-weight: 900; line-height: 1.3; }
+  .vm span { font-size: 16px; font-weight: 500; line-height: 1.4; margin-top: 2px; }
+  .vm code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+  .ep { position: absolute; height: 32px; border: 2px solid var(--ink); background: #fff; font-size: 17px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+
+  .role { position: absolute; display: flex; align-items: flex-start; gap: 8px; }
+  .role img { width: 40px; height: 40px; margin-top: 4px; }
+  .role b { display: block; font-size: 17px; font-weight: 900; line-height: 1.3; }
+  .role span { display: block; font-size: 16px; font-weight: 500; line-height: 1.3; color: #4a4843; }
+  .node.wide { width: 190px; }
+  .lbl.step { color: var(--ink); font-weight: 900; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <!-- あなた: CloudShell で実行するコマンド。右端から、そのコマンドの宛先へ線を引く -->
+  <div class="lane you"></div>
+  <div class="cs"><img src="../icons/AWSCloudShell.svg">AWS CloudShell</div>
+  <div class="cs-sub">あなたがコマンドを実行</div>
+  <div class="port" id="p1" data-self="1" style="top:89px"><b>zip をアップロード</b><code>aws s3 cp</code></div>
+  <div class="port" id="p2" data-self="1" style="top:225px"><b>API を呼び出す</b><code>aws lambda-microvms</code></div>
+  <div class="port" id="p3" data-self="1" style="top:433px"><b>認証トークンでアクセス</b><code>curl</code></div>
+  <div class="port" id="p4" data-self="1" style="top:557px"><b>コードの生成を依頼</b><code>python3 sandbox.py</code></div>
+
+  <!-- AWS Cloud > 東京リージョン > AWS Lambda MicroVMs -->
+  <div class="grp" style="left:248px;top:0;width:552px;height:778px">
+    <div class="gl"><img src="../icons/AWSCloudlogo.svg"><span class="en">AWS Cloud</span></div>
+  </div>
+  <div class="grp region" style="left:262px;top:46px;width:524px;height:640px">
+    <div class="gl"><img src="../icons/Region.svg"><span class="ja">東京リージョン</span><span class="code">ap-northeast-1</span></div>
+  </div>
+  <div class="grp svc" id="lmvg" style="left:400px;top:240px;width:372px;height:278px">
+    <div class="gl"><img id="lmv" data-self="1" src="../icons/AWSLambda.svg"><span class="en">AWS Lambda MicroVMs</span></div>
+  </div>
+
+  <div class="node" id="s3" style="left:577px;top:92px"><img src="../icons/AmazonSimpleStorageService.svg"><div class="t">Amazon S3</div><div class="s">app.zip</div></div>
+  <div class="lbl" style="left:506px;top:206px">作成時に読み込む</div>
+  <div class="vm" id="img" style="left:552px;top:284px;width:200px;height:92px"><b>MicroVM イメージ</b><span>メモリとディスクの<br>スナップショット</span></div>
+  <div class="lbl" style="left:440px;top:390px">スナップショットから起動</div>
+  <div class="vm" id="vm" style="left:552px;top:428px;width:200px;height:72px"><b>MicroVM</b><span><code>server.py</code> が動作する</span></div>
+  <div class="ep" id="ep" style="left:422px;top:448px;width:132px">エンドポイント</div>
+
+  <div class="node" id="br" style="left:395px;top:560px"><img src="../icons/AmazonBedrock.svg"><div class="t">Amazon Bedrock</div><div class="s">AI がコードを生成</div></div>
+  <div class="node wide" id="logs" style="left:557px;top:560px"><img src="../icons/AmazonCloudWatch.svg"><div class="t">CloudWatch Logs</div><div class="s">ビルドと実行のログ</div></div>
+  <div id="lg" data-self="1" style="position:absolute;left:652px;top:518px;width:0;height:0"></div>
+
+  <!-- 手順の番号（設計書 v3 の README の章立て。README の番号が変わったら、ここも直す） -->
+  <div class="lbl step" style="left:286px;top:109px">手順 2</div>
+  <div class="lbl step" style="left:286px;top:245px">手順 2〜6</div>
+  <div class="lbl step" style="left:286px;top:453px">手順 4〜6</div>
+  <div class="lbl step" style="left:286px;top:577px">手順 7</div>
+
+  <!-- IAM はグローバルなサービスのため、リージョンの外に置く -->
+  <div class="role" style="left:286px;top:700px"><img src="../icons/AWSIdentityAccessManagementRole.svg"><div><b>ビルド用ロール</b><span>イメージの作成時に<br>Lambda が引き受ける</span></div></div>
+  <div class="role" style="left:540px;top:700px"><img src="../icons/AWSIdentityAccessManagementRole.svg"><div><b>実行用ロール</b><span>MicroVM の実行時に<br>Lambda が引き受ける</span></div></div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#p1', '#s3', {});
+  wire('#p2', '#lmv', {});
+  wire('#p3', '#ep', {});
+  wire('#p4', '#br', {dash: true});
+  wire('#s3', '#img', {from: 'b', to: 't'});
+  wire('#img', '#vm', {from: 'b', to: 't'});
+  wire('#lg', '#logs', {from: 'b', to: 't'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>

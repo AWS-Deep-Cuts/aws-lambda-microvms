@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- request-flow: 認証トークンの発行と、リクエストが MicroVM の中のアプリに届くまで（記事「起動とアクセス」・README 手順 4）。
+     上の枠はあなたが行う操作（CloudShell で実行するコマンド）、下の枠は AWS が自動で行う処理。
+     根拠:
+     - CreateMicrovmAuthToken の入力 microvmIdentifier / expirationInMinutes（最大 60 分）/ allowedPorts、
+       応答 authToken は "X-aws-proxy-auth" をキーにしたマップ（botocore lambda-microvms 2025-09-09 service-2.json、factsheet 081, 082, 083）
+     - "All requests to a MicroVM endpoint require a JWE authentication token. There is no unauthenticated access option."（factsheet 081）
+     - エンドポイントの形式 https://<microvm-id>.lambda-microvm.<region>.on.aws（factsheet 070）
+     - "By default, Lambda routes inbound traffic to port 8080 within your MicroVM." 別のポートは X-aws-proxy-port で指定し、
+       allowedPorts に無いポートは 403（Lambda 開発者ガイド microvms-launching、factsheet 071, 083）
+     - hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフック）。トークンが無いときのステータスコードは公開情報に無いため「拒否される」とだけ書く -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 669px; }
+  .node { width: 136px; }
+  .st { height: 124px; }
+  .card > .h i { font-style: normal; font-family: var(--font-mono); font-weight: 800; color: var(--hot); margin-right: 8px; }
+  .card > pre b { font-weight: 800; }
+  /* MicroVM の中のポート */
+  .ports { width: 100%; border-collapse: collapse; font-size: 16px; }
+  .ports td { padding: 4px 12px; border-top: 1.5px solid var(--line); line-height: 1.25; }
+  .ports td:first-child { font-family: var(--font-mono); font-weight: 800; width: 64px; }
+  .ports td:last-child { font-weight: 500; }
+  .ports tr.hot td { background: #ffe9df; }
+  .ports tr.hot td:first-child { color: var(--hot); }
+  /* 拒否される例 */
+  .deny { position: absolute; border: 3px solid var(--hot); background: #fff; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; }
+  .deny .c { font-size: 17px; font-weight: 900; color: var(--hot); line-height: 1.35; }
+  .deny code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; margin-top: 2px; white-space: nowrap; }
+  .deny .r { font-size: 18px; font-weight: 900; margin-top: 6px; }
+  .deny .r .op { margin-right: 6px; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <div class="lane" style="left:0;top:0;width:800px;height:331px"><span class="lt">あなたが行う操作</span></div>
+  <div class="lane aws" style="left:0;top:359px;width:800px;height:310px"><span class="lt">AWS が自動で行う処理</span></div>
+
+  <!-- あなた: 認証トークンの発行 -->
+  <div class="node" id="cs" style="left:12px;top:70px"><img src="../icons/AWSCloudShell.svg"><div class="t">AWS CloudShell</div></div>
+  <div class="st" data-self="1" id="s1" style="left:156px;top:36px;width:360px"><img src="../icons/AWSLambda.svg"><i>1</i><b>CreateMicrovmAuthToken を呼ぶ</b><span>MicroVM の ID、有効期限 60 分、<br>許可するポート 8080 を指定する</span></div>
+  <div class="card" id="tok" style="left:556px;top:36px;width:228px;height:124px">
+    <div class="h">応答 ・ 認証トークン</div>
+<pre>{"authToken": {
+  "<b>X-aws-proxy-auth</b>":
+    "<b>&lt;認証トークン&gt;</b>"}}</pre>
+  </div>
+
+  <!-- あなた: リクエスト -->
+  <div class="card" id="curl" style="left:16px;top:216px;width:768px;height:101px">
+    <div class="h"><i>2</i>curl でエンドポイントにリクエストを送る</div>
+<pre>curl https://&lt;MicroVM の ID&gt;.lambda-microvm.ap-northeast-1.on.aws/ping \
+     -H "<b id="hdr">X-aws-proxy-auth: &lt;認証トークン&gt;</b>"</pre>
+  </div>
+  <div id="pTok" data-self="1" style="position:absolute;left:247.5px;top:216px;width:1px;height:1px"></div>
+  <div class="lbl" id="lTok" style="left:335px;top:177px">認証トークンをヘッダーに付ける</div>
+  <div class="lbl" style="left:412px;top:334px">HTTPS</div>
+
+  <!-- AWS -->
+  <div class="st" data-self="1" id="s3" style="left:220px;top:379px;width:360px"><img src="../icons/AWSLambda.svg"><i>3</i><b>エンドポイント</b><span>認証トークンを検証し、<br>ポートが許可されているか確認する</span></div>
+
+  <div class="lbl" style="left:412px;top:515px">ポート 8080 に転送する</div>
+  <div class="deny" id="d1" style="left:16px;top:551px;width:230px;height:104px">
+    <div class="c">認証トークンが無い</div>
+    <div class="r"><span class="op">→</span>拒否される</div>
+  </div>
+  <div class="card" id="s4" style="left:276px;top:551px;width:248px;height:104px">
+    <div class="h"><i>4</i>MicroVM の中の server.py</div>
+    <table class="ports">
+      <tr class="hot"><td>8080</td><td>アプリ用のポート</td></tr>
+      <tr><td>9000</td><td>フック用のポート</td></tr>
+    </table>
+  </div>
+  <div class="deny" id="d2" style="left:554px;top:551px;width:230px;height:104px">
+    <div class="c">許可していないポート</div>
+    <code>X-aws-proxy-port: 9000</code>
+    <div class="r"><span class="op">→</span>403</div>
+  </div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#cs', '#s1', {});
+  wire('#s1', '#tok', {});
+  wire('#tok', '#pTok', {from: 'b', to: 't', elbow: 'vh'});
+  wire('#curl', '#s3', {from: 'b', to: 't'});
+  wire('#s3', '#d1', {from: 'l', to: 't', elbow: 'h', hot: true});
+  wire('#s3', '#d2', {from: 'r', to: 't', elbow: 'h', hot: true});
+  wire('#s3', '#s4', {from: 'b', to: 't'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>

@@ -2,87 +2,87 @@
 set -euo pipefail
 export AWS_PAGER=""
 
+# AWS Deep Cuts - Lambda MicroVMs ハンズオンの事前準備
+# MicroVMs そのものの操作（イメージの作成・起動・サスペンドなど）は、README の手順で 1 コマンドずつ実行します。
+# このスクリプトは、その前提になる次の 4 つだけを作成します。
+#   1. S3 バケット          … アプリの zip（Dockerfile と server.py）を保存する
+#   2. ビルド用の IAM ロール … イメージの作成中に Lambda が引き受け、S3 から zip を読み、ビルドのログを書く
+#   3. 実行用の IAM ロール   … MicroVM の実行中に Lambda が引き受け、アプリのログを書く
+#   4. CloudWatch Logs のロググループ … ビルドと実行のログの保存先（保持期間 7 日）
+
 readonly PROJECT_NAME="aws-deepcuts"
-readonly REGION="ap-northeast-1"          # Lambda MicroVMs は東京リージョンで提供（2026 年 10 月時点）
-readonly IMAGE_NAME="${PROJECT_NAME}-microvm-sandbox"
+readonly REGION="ap-northeast-1"          # Lambda MicroVMs は東京リージョンで提供されている（2026 年 10 月時点）
+readonly IMAGE_NAME="${PROJECT_NAME}-sandbox"
 readonly BUILD_ROLE_NAME="${PROJECT_NAME}-microvm-build-role"
 readonly EXEC_ROLE_NAME="${PROJECT_NAME}-microvm-exec-role"
 readonly LOG_GROUP="/aws/lambda-microvms/${PROJECT_NAME}"
-readonly HOOK_PORT=9000
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly RESOURCE_FILE="${SCRIPT_DIR}/resource-ids.env"
-readonly ARTIFACT="${SCRIPT_DIR}/app.zip"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  AWS Deep Cuts - Lambda MicroVMs セットアップ"
+echo "  AWS Deep Cuts - Lambda MicroVMs 事前準備"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# ─── [1/7] 前提チェック ─────────────────────────────────────────
-echo "[1/7] 前提を確認..."
+# ─── [1/5] 前提の確認 ─────────────────────────────────────────
+echo "[1/5] 前提を確認..."
 if [[ -f "${RESOURCE_FILE}" ]]; then
   echo "❌ Error: ${RESOURCE_FILE} が既に存在します。前回の環境が残っています。" >&2
   echo "   先に bash ./cleanup.sh を実行してください。" >&2
   exit 1
 fi
 if ! aws lambda-microvms run-microvm --generate-cli-skeleton input >/dev/null 2>&1; then
-  echo "❌ Error: この AWS CLI は lambda-microvms コマンドに対応していません（v2.35.10 以降が必要）。現在: $(aws --version 2>&1)" >&2
-  echo "   CloudShell の AWS CLI は最新版とは限りません。README の「前提条件」の手順でホームディレクトリに最新版を入れてください:" >&2
-  echo '   curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip && unzip -q -o /tmp/awscliv2.zip -d /tmp \\' >&2
-  echo '     && /tmp/aws/install --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin" --update && export PATH="$HOME/.local/bin:$PATH"' >&2
+  echo "❌ Error: この AWS CLI は lambda-microvms コマンドに対応していません（v2.35.10 以降が必要です）。" >&2
+  echo "   現在のバージョン: $(aws --version 2>&1)" >&2
+  echo "   README の「前提条件」の手順で、ホームディレクトリに最新版の AWS CLI をインストールしてください。" >&2
   exit 1
 fi
 for cmd in zip curl python3; do
-  command -v "${cmd}" >/dev/null || { echo "❌ Error: ${cmd} が見つかりません。" >&2; exit 1; }
+  command -v "${cmd}" >/dev/null || { echo "❌ Error: ${cmd} コマンドが見つかりません。" >&2; exit 1; }
 done
-if ! python3 -c "import boto3; boto3.client('lambda-microvms', region_name='${REGION}')" >/dev/null 2>&1; then
-  echo "❌ Error: この boto3 は lambda-microvms に対応していません（1.43.35 以降が必要。sandbox.py が使います）。" >&2
-  echo "   python3 -m pip install --user --upgrade boto3  を実行してから、もう一度 bash ./setup.sh を実行してください。" >&2
-  exit 1
-fi
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || {
-  echo "❌ Error: AWS 認証情報が取得できません。AWS CLI の設定を確認してください。" >&2
+  echo "❌ Error: AWS の認証情報を取得できません。CloudShell で実行しているか確認してください。" >&2
   exit 1
 }
 echo "  アカウント: ${ACCOUNT_ID} / リージョン: ${REGION}"
+
+# 作成したリソースは、作成した直後に resource-ids.env へ書き足す。
+# 途中で失敗しても、cleanup.sh がこのファイルを読んで、作成済みのリソースを削除できるようにするため。
+BUILD_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${BUILD_ROLE_NAME}"
+EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${EXEC_ROLE_NAME}"
+cat > "${RESOURCE_FILE}" <<EOF
+# AWS Deep Cuts Lambda MicroVMs - リソース情報（setup.sh が作成。README の手順で行を追記します）
+REGION="${REGION}"
+ACCOUNT_ID="${ACCOUNT_ID}"
+BUILD_ROLE_NAME="${BUILD_ROLE_NAME}"
+EXEC_ROLE_NAME="${EXEC_ROLE_NAME}"
+LOG_GROUP="${LOG_GROUP}"
+IMAGE_NAME="${IMAGE_NAME}"
+INGRESS_CONNECTOR="arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:ALL_INGRESS"
+EOF
+echo "  リソース情報の保存先: ${RESOURCE_FILE}"
 echo ""
 
-# ─── [2/7] ベースイメージの確認 ────────────────────────────────
-echo "[2/7] Lambda 管理のベースイメージを確認..."
-BASE_IMAGE_ARN=$(aws lambda-microvms list-managed-microvm-images --region "${REGION}" \
-  --query 'sort_by(items[?contains(imageArn, `al2023`)], &createdAt)[-1].imageArn' --output text)
-if [[ -z "${BASE_IMAGE_ARN}" || "${BASE_IMAGE_ARN}" == "None" ]]; then
-  echo "❌ Error: ベースイメージが見つかりません。リージョン ${REGION} で Lambda MicroVMs が使えるか確認してください。" >&2
-  aws lambda-microvms list-managed-microvm-images --region "${REGION}" --output table || true
-  exit 1
-fi
-echo "  ベースイメージ: ${BASE_IMAGE_ARN}"
-echo ""
-
-# ─── [3/7] S3 バケットとコード成果物 ────────────────────────────
-echo "[3/7] コード成果物（Dockerfile + server.py）を S3 にアップロード..."
+# ─── [2/5] S3 バケット ─────────────────────────────────────────
+echo "[2/5] アプリの zip を保存する S3 バケットを作成..."
 BUCKET_NAME="${PROJECT_NAME}-microvms-${ACCOUNT_ID}-$(date +%Y%m%d-%H%M%S)"
 aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}" \
   --create-bucket-configuration "LocationConstraint=${REGION}" >/dev/null
-aws s3api put-public-access-block --bucket "${BUCKET_NAME}" \
+echo "BUCKET_NAME=\"${BUCKET_NAME}\"" >> "${RESOURCE_FILE}"
+aws s3api put-public-access-block --bucket "${BUCKET_NAME}" --region "${REGION}" \
   --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-# コード成果物のバケットはバージョニングを有効にしておく（ビルドが特定バージョンのオブジェクトを参照できるように）
-aws s3api put-bucket-versioning --bucket "${BUCKET_NAME}" --versioning-configuration Status=Enabled --region "${REGION}"
-rm -f "${ARTIFACT}"
-(cd "${SCRIPT_DIR}/app" && zip -q -r "${ARTIFACT}" Dockerfile server.py)
-aws s3 cp "${ARTIFACT}" "s3://${BUCKET_NAME}/app.zip" --region "${REGION}" >/dev/null
-echo "  s3://${BUCKET_NAME}/app.zip ($(du -h "${ARTIFACT}" | cut -f1))"
+# zip を上書きしても、作成済みのイメージが参照した版を残せるように、バージョニングを有効にする
+aws s3api put-bucket-versioning --bucket "${BUCKET_NAME}" --region "${REGION}" \
+  --versioning-configuration Status=Enabled
+echo "  作成: s3://${BUCKET_NAME}"
 echo ""
 
-# ─── [4/7] ビルド用 IAM ロール ──────────────────────────────────
-# イメージ作成時に Lambda サービスが引き受け、S3 から成果物を取得し、ビルドログを CloudWatch Logs に書く。
-# もう 1 つ、実行ロール（microVM が実行時に引き受け、ランタイムのログを CloudWatch Logs に書く）も作る。
-# 実行ロールが無いと、アプリの標準出力やフックのログは CloudWatch Logs に転送されない。
-echo "[4/7] ビルド用・実行用の IAM ロールを作成..."
-# Lambda サービスが引き受けるロールの信頼ポリシー（sts:TagSession も必要）。
-# 本番では混乱した代理（confused deputy）対策に aws:SourceAccount 条件を付けるのが推奨だが、
-# ハンズオンでは公式チュートリアルと同じ最小構成にしている。
+# ─── [3/5] IAM ロール ─────────────────────────────────────────
+echo "[3/5] ビルド用と実行用の IAM ロールを作成..."
+# どちらのロールも、Lambda のサービスが引き受ける（sts:TagSession も必要）。
+# 本番では aws:SourceAccount の条件を付けて、他のアカウントからの利用を防ぐことが推奨されている。
+# このハンズオンでは、公式チュートリアルと同じ最小限の構成にしている。
 TRUST_POLICY='{
   "Version": "2012-10-17",
   "Statement": [{
@@ -91,11 +91,9 @@ TRUST_POLICY='{
     "Action": ["sts:AssumeRole", "sts:TagSession"]
   }]
 }'
-BUILD_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${BUILD_ROLE_NAME}"
-EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${EXEC_ROLE_NAME}"
 for ROLE in "${BUILD_ROLE_NAME}" "${EXEC_ROLE_NAME}"; do
   if aws iam get-role --role-name "${ROLE}" >/dev/null 2>&1; then
-    echo "  ℹ️  既に存在します: ${ROLE}"
+    echo "  既に存在するため、そのまま使います: ${ROLE}"
   else
     aws iam create-role --role-name "${ROLE}" \
       --description "AWS Deep Cuts Lambda MicroVMs hands-on" \
@@ -104,16 +102,7 @@ for ROLE in "${BUILD_ROLE_NAME}" "${EXEC_ROLE_NAME}"; do
     echo "  作成: ${ROLE}"
   fi
 done
-aws iam put-role-policy --role-name "${EXEC_ROLE_NAME}" --policy-name "${PROJECT_NAME}-microvm-exec" \
-  --policy-document "{
-    \"Version\": \"2012-10-17\",
-    \"Statement\": [{
-      \"Sid\": \"WriteRuntimeLogs\",
-      \"Effect\": \"Allow\",
-      \"Action\": [\"logs:CreateLogGroup\", \"logs:CreateLogStream\", \"logs:PutLogEvents\"],
-      \"Resource\": \"arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:${LOG_GROUP}:*\"
-    }]
-  }"
+# ビルド用ロール: S3 の zip を読む権限と、ビルドのログを書く権限
 aws iam put-role-policy --role-name "${BUILD_ROLE_NAME}" --policy-name "${PROJECT_NAME}-microvm-build" \
   --policy-document "{
     \"Version\": \"2012-10-17\",
@@ -132,108 +121,52 @@ aws iam put-role-policy --role-name "${BUILD_ROLE_NAME}" --policy-name "${PROJEC
       }
     ]
   }"
-echo "  IAM の伝播を待機（10 秒）..."
-sleep 10
+# 実行用ロール: アプリのログを書く権限だけ（MicroVM の中のアプリは、これ以外の AWS の操作ができない）
+aws iam put-role-policy --role-name "${EXEC_ROLE_NAME}" --policy-name "${PROJECT_NAME}-microvm-exec" \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [{
+      \"Sid\": \"WriteRuntimeLogs\",
+      \"Effect\": \"Allow\",
+      \"Action\": [\"logs:CreateLogGroup\", \"logs:CreateLogStream\", \"logs:PutLogEvents\"],
+      \"Resource\": \"arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:${LOG_GROUP}:*\"
+    }]
+  }"
+{
+  echo "BUILD_ROLE_ARN=\"${BUILD_ROLE_ARN}\""
+  echo "EXEC_ROLE_ARN=\"${EXEC_ROLE_ARN}\""
+} >> "${RESOURCE_FILE}"
+echo "  ビルド用ロール: ${BUILD_ROLE_ARN}"
+echo "  実行用ロール:   ${EXEC_ROLE_ARN}"
 echo ""
 
-# ─── [5/7] CloudWatch Logs ロググループ ──────────────────────────
-echo "[5/7] ロググループを作成..."
+# ─── [4/5] CloudWatch Logs のロググループ ───────────────────────
+echo "[4/5] ロググループを作成..."
 if aws logs describe-log-groups --log-group-name-prefix "${LOG_GROUP}" --region "${REGION}" \
      --query "logGroups[?logGroupName=='${LOG_GROUP}'] | length(@)" --output text | grep -q '^[1-9]'; then
-  echo "  ℹ️  既に存在します: ${LOG_GROUP}"
+  echo "  既に存在するため、そのまま使います: ${LOG_GROUP}"
 else
-  aws logs create-log-group --log-group-name "${LOG_GROUP}" --region "${REGION}" \
-    --tags "Project=${PROJECT_NAME}"
+  aws logs create-log-group --log-group-name "${LOG_GROUP}" --region "${REGION}" --tags "Project=${PROJECT_NAME}"
   aws logs put-retention-policy --log-group-name "${LOG_GROUP}" --retention-in-days 7 --region "${REGION}"
-  echo "  作成: ${LOG_GROUP}（保持 7 日）"
+  echo "  作成: ${LOG_GROUP}（保持期間 7 日）"
 fi
 echo ""
 
-# ─── [6/7] MicroVM イメージの作成（ビルド = 起動してスナップショット） ──
-echo "[6/7] MicroVM イメージを作成（Dockerfile を実行 → アプリ起動 → /ready を待つ → メモリとディスクをスナップショット）..."
-IMAGE_ARN=$(aws lambda-microvms create-microvm-image --region "${REGION}" \
-  --name "${IMAGE_NAME}" \
-  --description "AWS Deep Cuts: stateful Python sandbox" \
-  --base-image-arn "${BASE_IMAGE_ARN}" \
-  --build-role-arn "${BUILD_ROLE_ARN}" \
-  --code-artifact "uri=s3://${BUCKET_NAME}/app.zip" \
-  --logging "{\"cloudWatch\":{\"logGroup\":\"${LOG_GROUP}\"}}" \
-  --hooks "{
-    \"port\": ${HOOK_PORT},
-    \"microvmImageHooks\": {\"ready\": \"ENABLED\", \"readyTimeoutInSeconds\": 120},
-    \"microvmHooks\": {
-      \"run\": \"ENABLED\", \"runTimeoutInSeconds\": 10,
-      \"suspend\": \"ENABLED\", \"suspendTimeoutInSeconds\": 10,
-      \"resume\": \"ENABLED\", \"resumeTimeoutInSeconds\": 10,
-      \"terminate\": \"ENABLED\", \"terminateTimeoutInSeconds\": 10
-    }
-  }" \
-  --environment-variables "APP_PORT=8080,HOOK_PORT=${HOOK_PORT}" \
-  --resources '[{"minimumMemoryInMiB": 512}]' \
-  --tags "Project=${PROJECT_NAME}" \
-  --query 'imageArn' --output text)
-echo "  イメージ: ${IMAGE_ARN}"
-echo "  ビルド完了を待機中（数分かかります）..."
-STATE=""
-for _ in $(seq 1 60); do
-  STATE=$(aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
-    --query 'state' --output text)
-  case "${STATE}" in
-    CREATED) break ;;
-    CREATE_FAILED)
-      echo "❌ Error: イメージのビルドに失敗しました。CloudWatch Logs の ${LOG_GROUP} と、下の stateReason を確認してください。" >&2
-      aws lambda-microvms list-microvm-image-versions --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
-        --query 'items[].{imageVersion:imageVersion,state:state,stateReason:stateReason}' --output table >&2 || true
-      echo "   stateReason が S3_ACCESS_DENIED なら IAM ロールの伝播待ちが原因のことがあります。bash ./cleanup.sh のあと、もう一度 bash ./setup.sh を実行してください。" >&2
-      exit 1 ;;
-    *) printf '.'; sleep 15 ;;
-  esac
-done
-echo ""
-if [[ "${STATE}" != "CREATED" ]]; then
-  echo "❌ Error: 15 分待ってもビルドが完了しませんでした（state=${STATE}）。しばらく待ってから get-microvm-image で確認してください。" >&2
-  exit 1
-fi
-IMAGE_VERSION=$(aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
-  --query 'latestActiveImageVersion' --output text)
-echo "  ビルド完了: version ${IMAGE_VERSION}"
-
-# スナップショットの大きさ（= 起動済みのメモリとディスクが凍結されている証拠）。
-# 1 バージョンにつき、対象チップセット世代ごとにビルド（スナップショット）が作られる。
-echo "  このバージョンのビルド（スナップショット）:"
-for BUILD_ID in $(aws lambda-microvms list-microvm-image-builds --image-identifier "${IMAGE_ARN}" \
-  --image-version "${IMAGE_VERSION}" --region "${REGION}" --query 'items[].buildId' --output text); do
-  aws lambda-microvms get-microvm-image-build --image-identifier "${IMAGE_ARN}" \
-    --image-version "${IMAGE_VERSION}" --build-id "${BUILD_ID}" --region "${REGION}" \
-    --query '{buildState:buildState,architecture:architecture,chipset:chipset,chipsetGeneration:chipsetGeneration,memorySnapshotBytes:to_string(snapshotBuild.memorySnapshotSizeInBytes),diskSnapshotBytes:to_string(snapshotBuild.diskSnapshotSizeInBytes),codeInstallBytes:to_string(snapshotBuild.codeInstallSizeInBytes)}' \
-    --output table
-done
-echo ""
-
-# ─── [7/7] リソース情報を保存 ───────────────────────────────────
-echo "[7/7] リソース情報を保存..."
-cat > "${RESOURCE_FILE}" <<EOF
-# AWS Deep Cuts Lambda MicroVMs - リソース情報（setup.sh が自動生成）
-REGION="${REGION}"
-ACCOUNT_ID="${ACCOUNT_ID}"
-BUCKET_NAME="${BUCKET_NAME}"
-BUILD_ROLE_NAME="${BUILD_ROLE_NAME}"
-BUILD_ROLE_ARN="${BUILD_ROLE_ARN}"
-EXEC_ROLE_NAME="${EXEC_ROLE_NAME}"
-EXEC_ROLE_ARN="${EXEC_ROLE_ARN}"
-LOG_GROUP="${LOG_GROUP}"
-BASE_IMAGE_ARN="${BASE_IMAGE_ARN}"
-IMAGE_NAME="${IMAGE_NAME}"
-IMAGE_ARN="${IMAGE_ARN}"
-IMAGE_VERSION="${IMAGE_VERSION}"
-HOOK_PORT="${HOOK_PORT}"
-APP_PORT="8080"
-EOF
-echo "  ${RESOURCE_FILE}"
+# ─── [5/5] IAM の反映待ち ──────────────────────────────────────
+# 作成した直後の IAM ロールは、Lambda から引き受けられるようになるまで少し時間がかかる
+echo "[5/5] IAM ロールの反映を待機（10 秒）..."
+sleep 10
 echo ""
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ セットアップが完了しました！"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "次のステップ: python3 sandbox.py で microVM を起動し、サンドボックスと会話してください。"
+echo "作成したリソースは、マネジメントコンソールの次の画面で確認できます。"
+echo "  S3 バケット:   https://${REGION}.console.aws.amazon.com/s3/buckets/${BUCKET_NAME}?region=${REGION}"
+echo "  IAM ロール:    https://us-east-1.console.aws.amazon.com/iam/home#/roles/details/${BUILD_ROLE_NAME}"
+echo "                 https://us-east-1.console.aws.amazon.com/iam/home#/roles/details/${EXEC_ROLE_NAME}"
+echo "  ロググループ:  https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups"
+echo ""
+echo "次のステップ: README の手順 1 に戻り、作成したリソースを確認してから、次のコマンドで変数を読み込んでください。"
+echo "  source ./resource-ids.env"

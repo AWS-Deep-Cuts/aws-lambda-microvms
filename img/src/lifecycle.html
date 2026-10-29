@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- lifecycle: MicroVM の状態と、状態を変える操作、状態ごとの料金（記事「サスペンドとレジューム」・README 手順 5）。
+     状態は 6 つ。留まる状態（RUNNING・SUSPENDED・TERMINATED）は、見出しの帯と料金の帯を持つ箱で描く。
+     途中の状態（PENDING・SUSPENDING・TERMINATING）は、その間に Lambda が行う処理を書いた箱で描く。
+     状態を変えるきっかけには、誰が行うかの札を付ける（あなた: あなたが API を呼ぶ／自動: Lambda が自動で行う）。
+     根拠:
+     - 状態の enum MicrovmState: PENDING, RUNNING, SUSPENDING, SUSPENDED, TERMINATING, TERMINATED。RESUMING は無い
+       （botocore lambda-microvms/2025-09-09/service-2.json、factsheet 055）
+     - RunMicrovm: "The MicroVM starts in PENDING state and transitions to RUNNING once provisioning completes."
+       SuspendMicrovm: "preserving its full memory and disk state. The MicroVM transitions through SUSPENDING to SUSPENDED.
+       To restore, call ResumeMicrovm or send traffic to the endpoint if autoResumeEnabled is true."
+       ResumeMicrovm: "The MicroVM must be in SUSPENDED state."（service-2.json、factsheet 057）
+     - IdlePolicy: maxIdleDurationSeconds（リクエストが無いまま、この秒数がたつとサスペンド）、suspendedDurationSeconds（サスペンドが
+       この秒数続くと終了）、autoResumeEnabled（サスペンド中にリクエストが届くとレジューム）。"Idle time is measured by inbound traffic
+       through the MicroVM proxy endpoint"（service-2.json の IdlePolicy、factsheet 058）
+     - RunMicrovmRequest.maximumDurationInSeconds: "The maximum duration in seconds that the MicroVM can exist before being terminated
+       by the platform." RUNNING と SUSPENDED の時間の合計で数える（service-2.json、docs microvms-launching、factsheet 056）
+     - フック: /run はスナップショットからの起動の後に送られ、200 が返ると RUNNING になる（factsheet 061）。/suspend は SUSPENDING の間、
+       保存の前に送られる。/resume の間は SUSPENDED のままで、200 が返ると RUNNING になる。/terminate は終了の直前に送られる
+       （docs microvms-launching、factsheet 065、公式 skill aws-lambda-microvms の references/lifecycle-model.md）
+     - 料金: "Suspended MicroVMs incur snapshot storage charges but not compute charges."、TERMINATED は料金がかからない（AWS Lambda FAQ、factsheet 097）
+     - 状態の遷移: 公式 skill の references/lifecycle-model.md「MicroVM state machine」
+     省略したもの: PENDING と SUSPENDING からの TerminateMicrovm、/run フックの失敗による終了、スナップショットの読み書きの料金（billing の図で扱う）。
+     「アイドルポリシー」という語は記事で図の後に定義するため、図では条件を言葉で書く。線はすべて水平か垂直 -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 744px; }
+
+  /* 状態を変えるきっかけ。1 行ごとに、誰が行うかの札（あなた／自動）を付ける */
+  .trig { position: absolute; left: 272px; display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .who { flex: none; width: 56px; text-align: center; font-size: 16px; font-weight: 900; line-height: 26px; color: #fff; background: var(--grey); }
+  .who.auto { background: var(--hot); }
+  .row .api { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+  .row .cond { font-size: 16px; font-weight: 900; }
+  .trig .hook { font-size: 16px; font-weight: 500; line-height: 1.45; white-space: nowrap; margin-top: 2px; }
+
+  /* 札の意味 */
+  .legend { position: absolute; right: 0; top: 0; border: 2px solid var(--line); background: #fff; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .legend .row span:last-child { font-size: 16px; font-weight: 500; }
+
+  /* 途中の状態（その間に Lambda が処理を行う） */
+  .mid { position: absolute; border: 3px solid var(--ink); background: #fff; padding: 8px 12px; }
+  .mid b { display: block; font-family: var(--font-mono); font-weight: 800; font-size: 18px; line-height: 1.3; }
+  .mid span { display: block; margin-top: 4px; font-size: 16px; font-weight: 500; line-height: 1.45; }
+  .mid.bar { display: flex; align-items: center; justify-content: center; gap: 20px; padding: 0 12px; }
+  .mid.bar span { margin-top: 0; }
+  code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+
+  /* 留まる状態：見出しの帯＋説明＋料金の帯（料金の帯は箱の下端にそろえる） */
+  .stay { position: absolute; border: 3px solid var(--ink); background: #fff; display: flex; flex-direction: column; }
+  .stay > .h { background: var(--ink); color: #fff; font-family: var(--font-mono); font-weight: 800; font-size: 18px; padding: 7px 12px; line-height: 1.3; }
+  .stay > .d { padding: 8px 12px; font-size: 16px; font-weight: 500; line-height: 1.45; }
+  .stay > .fee { margin-top: auto; border-top: 2px solid var(--ink); background: var(--bone); padding: 6px 12px; font-size: 16px; font-weight: 900; line-height: 1.45; }
+  .stay.end { border-color: var(--grey); }
+  .stay.end > .h { background: var(--grey); }
+  .stay.end > .fee { border-top-color: var(--grey); }
+
+  .pt { position: absolute; width: 1px; height: 1px; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <div class="legend">
+    <div class="row"><span class="who">あなた</span><span>あなたが API を呼ぶ</span></div>
+    <div class="row"><span class="who auto">自動</span><span>Lambda が自動で行う</span></div>
+  </div>
+
+  <!-- 起動。RunMicrovm の行は PENDING の中心の高さ（y=49） -->
+  <div class="mid" id="pending" style="left:0;top:0;width:256px;height:98px"><b>PENDING</b><span>Lambda がスナップショットを<br>復元し、<code>/run</code> フックを送る</span></div>
+  <div class="trig" id="tRun" style="left:290px;top:36px"><div class="row"><span class="who">あなた</span><span class="api">RunMicrovm</span></div></div>
+
+  <!-- 実行中とサスペンド。RUNNING と SUSPENDING の中心の高さ（y=202）をそろえ、サスペンドの線を水平にする -->
+  <div class="stay" id="running" style="left:0;top:141px;width:256px;height:122px">
+    <div class="h">RUNNING</div>
+    <div class="d">アプリがリクエストを処理する</div>
+    <div class="fee">vCPU とメモリの料金がかかる</div>
+  </div>
+  <div class="trig" id="tSus" style="top:134px">
+    <div class="row"><span class="who">あなた</span><span class="api">SuspendMicrovm</span></div>
+    <div class="row"><span class="who auto">自動</span><span class="cond">一定時間リクエストが無い</span></div>
+  </div>
+  <div class="mid" id="suspending" style="left:544px;top:141px;width:256px;height:122px"><b>SUSPENDING</b><span>Lambda が <code>/suspend</code> フックを<br>送り、メモリとディスクの<br>内容を保存する</span></div>
+  <div class="stay" id="suspended" style="left:544px;top:303px;width:256px;height:144px">
+    <div class="h">SUSPENDED</div>
+    <div class="d">MicroVM は一時停止している</div>
+    <div class="fee">スナップショットの保存料金<br>だけがかかる</div>
+  </div>
+
+  <!-- レジューム。SUSPENDED の中心の高さ（y=375）から RUNNING の下端へ戻る。
+       RESUMING という状態は無い（SUSPENDED のまま /resume フックが送られ、200 が返ると RUNNING） -->
+  <div class="trig" id="tRes" style="top:274px">
+    <div class="row"><span class="who">あなた</span><span class="api">ResumeMicrovm</span></div>
+    <div class="row"><span class="who auto">自動</span><span class="cond">リクエストが届く</span></div>
+    <div class="hook">Lambda が <code>/resume</code> フックを送る</div>
+  </div>
+  <div class="pt" id="pRunB" data-self="1" style="left:199.5px;top:262px"></div>
+
+  <!-- 終了。RUNNING（x=128）と SUSPENDED（x=672）の下端から、まっすぐ TERMINATING に下ろす -->
+  <div class="trig" id="tTer" style="top:465px">
+    <div class="row"><span class="who">あなた</span><span class="api">TerminateMicrovm</span></div>
+    <div class="row"><span class="who auto">自動</span><span class="cond">起動から最長時間が経過</span></div>
+    <div class="row"><span class="who auto">自動</span><span class="cond">サスペンドが一定時間続く</span></div>
+  </div>
+  <div class="pt" id="pTerL" data-self="1" style="left:127.5px;top:262px"></div>
+  <div class="pt" id="pTerR" data-self="1" style="left:671.5px;top:446px"></div>
+  <div class="mid bar" id="terminating" style="left:0;top:573px;width:800px;height:48px"><b>TERMINATING</b><span>Lambda が <code>/terminate</code> フックを送る</span></div>
+  <div class="pt" id="pBarL" data-self="1" style="left:127.5px;top:573px"></div>
+  <div class="pt" id="pBarR" data-self="1" style="left:671.5px;top:573px"></div>
+  <div class="stay end" id="terminated" style="left:270px;top:661px;width:260px">
+    <div class="h">TERMINATED</div>
+    <div class="fee">料金はかからない</div>
+  </div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#tRun', '#pending', {from: 'l', to: 'r'});
+  wire('#pending', '#running', {from: 'b', to: 't'});
+  wire('#running', '#suspending', {from: 'r', to: 'l'});
+  wire('#suspending', '#suspended', {from: 'b', to: 't'});
+  wire('#suspended', '#pRunB', {from: 'l', to: 'b', elbow: 'h'});
+  wire('#pTerL', '#pBarL', {from: 'b', to: 't'});
+  wire('#pTerR', '#pBarR', {from: 'b', to: 't'});
+  wire('#terminating', '#terminated', {from: 'b', to: 't'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>
