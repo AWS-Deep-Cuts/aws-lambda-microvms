@@ -11,7 +11,7 @@
 
 > ⚠️ **コストに関する注意**
 >
-> MicroVM は、状態が `RUNNING` の間だけ vCPU とメモリの料金がかかります。サスペンド中は、スナップショットの保存料金だけがかかります。このハンズオンでは、起動した MicroVM が最長 60 分で自動的に終了するように設定します。MicroVM イメージのスナップショットには、後片付けで削除するまで保存料金がかかります。
+> MicroVM は、Lambda MicroVMs が起動する 1 台の軽量な仮想マシンです。MicroVM には、状態が `RUNNING` の間だけ、vCPU（仮想 CPU）とメモリの料金がかかります。MicroVM を一時停止するサスペンドの間は、vCPU とメモリの料金はかからず、メモリとディスクの内容を保存したデータであるスナップショットの保存料金だけがかかります。このハンズオンでは、1 台の MicroVM を動かせる時間の上限である最長時間を 60 分に設定し、起動から 60 分たった MicroVM を Lambda が自動で終了するようにします。MicroVM の起動に使う MicroVM イメージにも、MicroVM の中のアプリを起動した状態のスナップショットが含まれており、後片付けで MicroVM イメージを削除するまで保存料金がかかります。
 >
 > | 放置期間 | 概算コストの上限 |
 > | --- | --- |
@@ -54,7 +54,7 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
 
 - あなたは CloudShell から AWS CLI のコマンドを実行し、Lambda MicroVMs の API を呼び出します。
 - MicroVM イメージの作成中は、Lambda がビルド用ロールを使って S3 から zip を読み込み、ログを CloudWatch Logs に書き込みます。
-- MicroVM の実行中は、Lambda が実行用ロールを使って、アプリのログを CloudWatch Logs に書き込みます。
+- MicroVM の実行中は、Lambda が実行用ロールを使って、MicroVM の中のアプリのログを CloudWatch Logs に書き込みます。
 - あなたは MicroVM のエンドポイントに、認証トークンを付けた HTTPS のリクエストを送ります。
 
 ## 前提条件
@@ -232,6 +232,8 @@ Dockerfile は、MicroVM の中でアプリを動かすコンテナの作り方�
 | ベースイメージ `al2023-1` | 手順 2-4 の `create-microvm-image` の `--base-image-arn` | MicroVM の OS。Lambda が管理する Amazon Linux 2023 のイメージ |
 | コンテナイメージ `al2023-minimal` | Dockerfile の FROM | アプリを動かすコンテナの元になるイメージ。AWS が Lambda MicroVMs 用に公開している。スナップショットからの復元に対応した OpenSSL が入っている |
 
+Dockerfile の FROM で指定するイメージは、一般にベースイメージと呼ばれます。このハンズオンでベースイメージと書くときは、FROM で指定するイメージではなく、表のベースイメージ `al2023-1` を指します。server.py を動かすコンテナは、このベースイメージの OS の上で動きます。
+
 server.py は、Python の標準ライブラリだけで書いた Web アプリです。2 つのポートで HTTP のリクエストを受け付けます。ポート 9000 では、フックを受け付けます。フックとは、MicroVM の状態が変わるときに、Lambda がアプリへ送る HTTP のリクエストです。正式な名前はライフサイクルフックで、イメージの作成の完了の直前、起動、サスペンド、レジューム、終了のときに送られます。
 
 | ポート | パス | 内容 |
@@ -321,7 +323,7 @@ echo "${IMAGE_ARN}"
 | `--build-role-arn` | ビルド用ロール | 作成中に Lambda が引き受けるロール |
 | `--code-artifact` | S3 の zip の場所 | Dockerfile とアプリ |
 | `--hooks` | `hooks.json` | フックを受け付けるポートと、使うフックの種類 |
-| `--resources` | 512 MiB | MicroVM のメモリのベースライン。ベースラインは、MicroVM に常に割り当てる vCPU とメモリの量。vCPU はメモリ 2 GB あたり 1 個の割合で決まり、この設定では 0.25 個。既定は 2 GB と 1 vCPU |
+| `--resources` | 512 MiB | MicroVM のメモリのベースライン。ベースラインは、Lambda が MicroVM に常に割り当てる vCPU とメモリの量。vCPU はメモリ 2 GB あたり 1 個の割合で決まり、この設定では 0.25 個。既定は 2 GB と 1 vCPU |
 | `--logging` | ロググループの名前 | イメージの作成のログを書き込む先 |
 
 `hooks.json` では、ポート 9000 で 5 種類のフックを受け付けるように指定しています。
@@ -330,7 +332,7 @@ echo "${IMAGE_ARN}"
 cat hooks.json
 ```
 
-`ENABLED` は、Lambda がそのフックをアプリに送ることを表します。名前が `TimeoutInSeconds` で終わる項目は、Lambda がアプリから 200 が返るのを待つ秒数です。ready フックや run フックで、この時間内に 200 が返らないと、イメージの作成や MicroVM の起動が失敗します。
+`ENABLED` は、Lambda がそのフックをアプリに送ることを表します。名前が `TimeoutInSeconds` で終わる項目は、Lambda が、アプリから成功を表す HTTP のステータスコード 200 が返るのを待つ秒数です。ready フックや run フックで、この時間内に 200 が返らないと、イメージの作成や MicroVM の起動が失敗します。
 
 | フック | Lambda がアプリに送るタイミング |
 | --- | --- |
@@ -340,7 +342,7 @@ cat hooks.json
 | resume | MicroVM をレジュームした直後 |
 | terminate | MicroVM を終了する直前 |
 
-Lambda は、たとえば ready フックを、`/aws/lambda-microvms/runtime/v1/ready` というパスへの POST リクエストとして送ります。
+Lambda は、それぞれのフックを、手順 2-1 の表にあるポート 9000 のパスに、POST リクエストとして送ります。たとえば ready フックでは、パスの `<フック名>` の部分が `ready` になります。
 
 ### 2-5. 作成の完了を待つ
 
@@ -370,9 +372,9 @@ done
 > - **期待する結果**: 作成中は `CREATING`、完了すると `CREATED` と表示されます。CLI のループが表示する状態と同じです。
 > - **ここから分かること**: CLI の `create-microvm-image` は、作成を依頼するだけです。作成の処理は、AWS の中で Lambda が進めています。
 
-### 2-6. ビルドとスナップショットの大きさを確認する
+### 2-6. イメージのビルドとスナップショットの大きさを確認する
 
-MicroVM イメージは、作成や更新のたびに新しいバージョンが作られます。Lambda は、バージョンごとに、Dockerfile の実行からスナップショットの保存までの処理の記録を残します。この記録をビルドと呼びます。ビルドは CPU の種類と世代ごとに行われることがあるため、1 つのバージョンにビルドが複数あることもあります。この手順では、ビルドの一覧と、保存されたスナップショットの大きさを確認します。
+MicroVM イメージを作成または更新するたびに、新しいバージョンが作成されます。Lambda は、バージョンごとに、Dockerfile を実行して server.py を起動し、スナップショットを保存する処理を行います。この処理をイメージのビルドと呼びます。API では、イメージのビルドごとに記録が残ります。イメージのビルドは CPU の種類と世代ごとに分かれることがあるため、1 つのバージョンにイメージのビルドが複数あることもあります。この手順では、イメージのビルドの一覧と、保存されたスナップショットの大きさを確認します。
 
 ```bash
 IMAGE_VERSION=$(aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" \
@@ -383,7 +385,7 @@ aws lambda-microvms list-microvm-image-builds --image-identifier "${IMAGE_ARN}" 
   --query 'items[].[buildId, chipset, chipsetGeneration, buildState]' --output table
 ```
 
-`latestActiveImageVersion` は、MicroVM の起動に使える最新のバージョンです。表の 1 行が 1 つのビルドで、列は左から、ビルドの ID、CPU の種類、CPU の世代、ビルドの状態です。
+`latestActiveImageVersion` は、MicroVM の起動に使える最新のバージョンです。表の 1 行が、イメージのビルド 1 つに当たります。列は左から、ビルドの ID、CPU の種類、CPU の世代、ビルドの状態です。
 
 1 つ目のビルドの詳細から、スナップショットの大きさを表示します。
 
@@ -437,7 +439,7 @@ echo "${MICROVM_ID}"
 | `--execution-role-arn` | 実行用ロール | 実行中に Lambda が引き受けるロール。アプリのログを CloudWatch Logs に書き込むために使う |
 | `--ingress-network-connectors` | `INGRESS_CONNECTOR`。`ALL_INGRESS` の ARN | エンドポイントに届いたリクエストを MicroVM に通すネットワークコネクタ |
 | `--idle-policy` | 300・1800・true | 5 分間リクエストが無いと自動でサスペンドする。サスペンドが 30 分続くと終了する。サスペンド中にリクエストが届くと自動でレジュームする |
-| `--maximum-duration-in-seconds` | 3600 | 起動から 60 分たつと終了する |
+| `--maximum-duration-in-seconds` | 3600 | 最長時間を 60 分にする。サスペンドしている時間も含めて、起動から 60 分たつと終了する |
 | `--logging` | ロググループの名前 | アプリのログを書き込む先 |
 | `--run-hook-payload` | `{"user": "handson"}` | run フックで、この MicroVM のアプリだけに渡す文字列 |
 
@@ -483,7 +485,7 @@ echo "${ENDPOINT}"
 > **この手順で確かめること**
 > - **やること**: まず、Lambda コンソールで MicroVM の一覧を開き、起動した MicroVM の状態を確認します。次に、CloudWatch Logs のコンソールで、ロググループ `/aws/lambda-microvms/aws-deepcuts` を開きます。名前が MicroVM の ID のログストリームを開き、`hook POST /aws/lambda-microvms/runtime/v1/run` の行を探します。
 > - **期待する結果**: MicroVM の一覧に、`MICROVM_ID` と同じ ID の MicroVM が `RUNNING` の状態で表示されています。ログの行の `body` には、`microvmId` と `runHookPayload` が含まれています。`runHookPayload` の値は `--run-hook-payload` で指定した文字列で、ログでは `"{\"user\": \"handson\"}"` のように、引用符の前にバックスラッシュが付いた形で表示されます。
-> - **ここから分かること**: MicroVM を起動すると、Lambda は run フックでアプリに起動を知らせ、`--run-hook-payload` の文字列を渡します。アプリがこのフックに 200 を返してから、エンドポイントへのリクエストが届くようになります。利用者の ID や、秘密情報の保存場所の名前のように MicroVM ごとに異なる値は、このフックで渡します。秘密情報そのものは渡しません。
+> - **ここから分かること**: MicroVM を起動すると、Lambda は run フックでアプリに起動を通知し、`--run-hook-payload` の文字列を渡します。アプリがこのフックに 200 を返してから、エンドポイントへのリクエストが届くようになります。あなたが開発するサービスの利用者の ID や、秘密情報の保存場所の名前のように、MicroVM ごとに異なる値は、このフックで渡します。秘密情報そのものは渡しません。
 
 ## ４．エンドポイントにアクセスする
 

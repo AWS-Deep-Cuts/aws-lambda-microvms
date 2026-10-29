@@ -12,7 +12,7 @@
      - 状態の enum MicrovmState: PENDING, RUNNING, SUSPENDING, SUSPENDED, TERMINATING, TERMINATED
      - "Suspended MicroVMs incur snapshot storage charges but not compute charges."（AWS Lambda FAQ）。コンピュートの料金は vCPU 秒とメモリの GB 秒（AWS Price List）
      - API: RunMicrovm・SuspendMicrovm・TerminateMicrovm（service-2.json）
-     表記: この図は記事だけで使うため、API を呼び出す側を記事の用語の「開発者」で書く（「開発者のアプリ」）。
+     表記: この図は記事だけで使うため、API を呼び出す側を記事の用語の「管理用のアプリ」で書く（記事の GLOSSARY: 開発者が作成し、Lambda MicroVMs の API を呼び出すプログラム）。
      状態の名前は、ほかの図の文中と同じ枠付きの等幅の札で書き、状態の意味（稼働中・サスペンド中）と料金の違いは説明の行で書く。
      サスペンド中の B は、いまリクエストを送っていないため、利用者 B からの線を点線にする。
      A〜C の状態は説明用の例。線はすべて水平か垂直。差し色は「MicroVM ごとのエンドポイント」だけに使う -->
@@ -51,8 +51,8 @@
 <div id="fig">
   <svg id="wires"></svg>
 
-  <!-- 開発者のアプリが API で MicroVM を起動・サスペンド・終了する -->
-  <div class="app" id="app" data-self="1" style="left:342px;top:0;width:200px">開発者のアプリ</div>
+  <!-- 管理用のアプリが API で MicroVM を起動・サスペンド・終了する -->
+  <div class="app" id="app" data-self="1" style="left:342px;top:0;width:200px">管理用のアプリ</div>
   <div class="api" style="left:456px;top:52px">RunMicrovm<br>SuspendMicrovm<br>TerminateMicrovm</div>
   <div id="apiEnd" data-self="1" style="position:absolute;left:442px;top:124px;width:0;height:0"></div>
 
