@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <!-- snapshot-random: 同じ MicroVM イメージから起動した 2 台の MicroVM で、GET /random の応答を比べる（記事「同じイメージから起動した MicroVM の注意点」・README 手順 6）。
-     左はスナップショットの内容。server.py のプロセスの中の値（boot_id、random モジュールの内部状態、/ready フックの記録）と、カーネルの乱数生成器。
+     左はスナップショットの内容。server.py のプロセスの中の値（boot_id、random モジュールの内部状態、ready フックの記録）と、カーネルの乱数生成器。
      右は 2 台の応答の例。値は説明用の例で、キーと形は hands-on/app/server.py の /random（json.dumps の indent=2）と同じ。
      差し色は「2 台で同じ値になるもの」だけに使う（スナップショットの中の boot_id と random の内部状態、応答の boot_id と random_random の行、左下の説明）。
      根拠:
@@ -10,11 +10,15 @@
      - "Content such as unique IDs, secrets, or network connections generated during the build is shared across all MicroVMs from the same image version,
        so generate it after the MicroVM starts instead."（docs microvms-best-practices、factsheet 091）
      - 公式 skill aws-lambda-microvms の references/snapshots-and-uniqueness.md: Python は secrets か random.SystemRandom を使い、既定のシードの random.random() は使わない。
-       一意な値は /run フックで生成する
-     - Firecracker の docs/snapshotting/random-for-clones.md: VMGenID で復元をゲストに通知し、Linux 5.18 以降のカーネルは乱数生成器を初期化し直す。
+       一意な値は run フックで生成する
+     - Firecracker の docs/snapshotting/random-for-clones.md: VMGenID で復元をゲストに通知し、Linux 5.18 以降のカーネルは乱数生成器に新しい種を混ぜ直す（reseed。
+       Linux の add_vmfork_randomness → crng_reseed。乱数生成器を作り直すのではない）。記事と README の手順 6 の「新しい種を混ぜ直す」と同じ表現
        "State other than the guest kernel entropy pool, such as unique identifiers, cached random numbers, cryptographic tokens, etc will still be replicated"（factsheet R1-17）
-     設計書との違い: スナップショットの内容に「カーネルの乱数生成器」を足した（右下の説明と対応させるため）。助言「一意な値は /run フックのあとに
+     設計書との違い: スナップショットの内容に「カーネルの乱数生成器」を足した（右下の説明と対応させるため）。助言「一意な値は run フックのあとに
      secrets モジュールで生成する」は、2 つの説明の下の帯に分けた。値の例は、README の手順 6 と同じく、各 MicroVM に GET /random を 1 回ずつ送った場合。
+     「2 台で同じ」は、2 台が同じビルドのスナップショットから復元された場合（記事・README の手順 6 の注記のとおり、ビルドが複数あると異なる）。
+     そのため左の箱の下端に「このスナップショットから 2 台の MicroVM を復元する」と書く。
+     表記: フックの名前は記事・README と同じく「ready フック」「run フック」と書く。説明の文は、すべて「。」で終える
      線は MicroVM イメージから 2 台への分岐だけで、すべて水平か垂直 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
@@ -68,10 +72,10 @@
       <div class="ph">server.py のプロセス</div>
       <div class="hot"><code>boot_id</code> の値<br><code class="v">"6f1c2e4a-9d3b-…"</code></div>
       <div class="hot"><code>random</code> モジュールの<br>内部状態</div>
-      <div><code>/ready</code> フックの記録</div>
+      <div><code>ready</code> フックの記録</div>
     </div>
     <div class="kern">カーネルの乱数生成器</div>
-    <div class="foot">Lambda は、この<br>スナップショットから<br>MicroVM を復元する</div>
+    <div class="foot">Lambda は、<br>このスナップショットから<br>2 台の MicroVM を復元する</div>
   </div>
 
   <!-- 右：2 台の GET /random の応答の例 -->
@@ -89,13 +93,13 @@
   <!-- 下：同じになる理由と、異なる理由。いちばん下に対策 -->
   <div class="note hot" id="n1" style="left:0;top:470px;width:392px;height:154px">
     <b>プロセスの中の値は、2 台で同じになる</b>
-    <span><code>boot_id</code> と <code>random</code> モジュールの内部状態は、<br>イメージの作成中に生成され、<br>スナップショットに含まれる</span>
+    <span><code>boot_id</code> と <code>random</code> モジュールの内部状態は、<br>イメージの作成中に生成され、<br>スナップショットに含まれる。</span>
   </div>
   <div class="note" id="n2" style="left:408px;top:470px;width:392px;height:154px">
     <b>カーネルから取得した乱数は、2 台で異なる</b>
-    <span><code>os.urandom()</code> と <code>uuid4()</code> は、呼び出すたびに<br>カーネルの乱数生成器から値を取得する。<br>Firecracker が復元をカーネルに通知し、<br>カーネルが乱数生成器を初期化し直す</span>
+    <span><code>os.urandom()</code> と <code>uuid4()</code> は、呼び出すたびに<br>カーネルの乱数生成器から値を取得する。<br>Firecracker が復元をカーネルに通知し、<br>カーネルが乱数生成器に新しい種を混ぜ直す。</span>
   </div>
-  <div class="fix" style="left:0;top:636px;width:800px;height:46px"><i>対策</i><span>MicroVM ごとに一意な値は、<code>/run</code> フックのあとに <code>secrets</code> モジュールで生成する</span></div>
+  <div class="fix" style="left:0;top:636px;width:800px;height:46px"><i>対策</i><span>MicroVM ごとに一意な値は、<code>run</code> フックのあとに <code>secrets</code> モジュールで生成する</span></div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;

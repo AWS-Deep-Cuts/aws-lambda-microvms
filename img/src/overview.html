@@ -12,12 +12,15 @@
      - 状態の enum MicrovmState: PENDING, RUNNING, SUSPENDING, SUSPENDED, TERMINATING, TERMINATED
      - "Suspended MicroVMs incur snapshot storage charges but not compute charges."（AWS Lambda FAQ）。コンピュートの料金は vCPU 秒とメモリの GB 秒（AWS Price List）
      - API: RunMicrovm・SuspendMicrovm・TerminateMicrovm（service-2.json）
+     表記: この図は記事だけで使うため、API を呼び出す側を記事の用語の「開発者」で書く（「開発者のアプリ」）。
+     状態の名前は、ほかの図の文中と同じ枠付きの等幅の札で書き、状態の意味（稼働中・サスペンド中）と料金の違いは説明の行で書く。
+     サスペンド中の B は、いまリクエストを送っていないため、利用者 B からの線を点線にする。
      A〜C の状態は説明用の例。線はすべて水平か垂直。差し色は「MicroVM ごとのエンドポイント」だけに使う -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 620px; }
+  #fig { width: 800px; height: 674px; }
 
   .grp { position: absolute; border: 2px solid var(--ink); }
   .grp > .gl { position: absolute; left: -2px; top: -2px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -31,12 +34,12 @@
   .imgbox b { font-size: 18px; font-weight: 900; line-height: 1.3; }
   .imgbox span { font-size: 16px; font-weight: 500; line-height: 1.45; margin-top: 4px; }
 
-  .vm { position: absolute; width: 284px; height: 106px; border: 3px solid var(--ink); background: #fff; }
-  .vm .top { position: relative; height: 66px; padding: 8px 12px 0; }
+  .vm { position: absolute; width: 290px; height: 124px; border: 3px solid var(--ink); background: #fff; }
+  .vm .top { position: relative; height: 84px; padding: 8px 12px 0; }
   .vm .top b { display: block; font-size: 18px; font-weight: 900; line-height: 28px; }
-  .vm .top span { display: block; font-size: 16px; font-weight: 500; line-height: 22px; margin-top: 2px; }
-  .vm .state8 { position: absolute; right: 10px; top: 10px; font-style: normal; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1; padding: 4px 7px; background: var(--ink); color: #fff; }
-  .vm .state8.off { background: #fff; color: var(--ink); border: 2px solid var(--ink); padding: 2px 5px; }
+  .vm .top span { display: block; font-size: 16px; font-weight: 500; line-height: 22px; margin-top: 2px; white-space: nowrap; }
+  /* 状態の名前：ほかの図の文中と同じ、枠付きの等幅の札 */
+  .vm .state8 { position: absolute; right: 10px; top: 10px; font-style: normal; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1; padding: 2px 5px; background: #fff; color: var(--ink); border: 2px solid var(--ink); }
   .vm .ep { height: 34px; border-top: 2px solid var(--hot); background: #fff1ea; color: var(--hot); font-size: 17px; font-weight: 900; display: flex; align-items: center; padding: 0 12px; }
 
   .colh { position: absolute; font-size: 17px; font-weight: 900; }
@@ -48,38 +51,40 @@
 <div id="fig">
   <svg id="wires"></svg>
 
-  <!-- あなたのアプリが API で MicroVM を起動・サスペンド・終了する -->
-  <div class="app" id="app" data-self="1" style="left:342px;top:0;width:200px">あなたのアプリ</div>
+  <!-- 開発者のアプリが API で MicroVM を起動・サスペンド・終了する -->
+  <div class="app" id="app" data-self="1" style="left:342px;top:0;width:200px">開発者のアプリ</div>
   <div class="api" style="left:456px;top:52px">RunMicrovm<br>SuspendMicrovm<br>TerminateMicrovm</div>
   <div id="apiEnd" data-self="1" style="position:absolute;left:442px;top:124px;width:0;height:0"></div>
 
-  <div class="grp" style="left:0;top:120px;width:610px;height:410px">
+  <div class="grp" style="left:0;top:120px;width:614px;height:460px">
     <div class="gl"><img src="../icons/AWSLambda.svg"><span class="en">AWS Lambda MicroVMs</span></div>
   </div>
 
-  <div class="imgbox" id="img" data-self="1" style="left:12px;top:258px;width:210px;height:170px"><b>MicroVM イメージ</b><span>アプリを起動した状態の<br>メモリとディスクの<br>スナップショット</span></div>
+  <!-- MicroVM イメージの中心の高さ（y=370）を MicroVM B の中心にそろえる -->
+  <div class="imgbox" id="img" data-self="1" style="left:12px;top:285px;width:210px;height:170px"><b>MicroVM イメージ</b><span>アプリを起動した状態の<br>メモリとディスクの<br>スナップショット</span></div>
 
   <div class="colh" style="left:300px;top:138px">セッションごとに 1 台ずつ起動</div>
 
   <div class="vm" id="vA" data-self="1" style="left:300px;top:172px">
-    <div class="top"><b>MicroVM A</b><span>vCPU とメモリの料金がかかる</span><i class="state8">RUNNING</i></div>
+    <div class="top"><b>MicroVM A</b><span>稼働中で、<br>vCPU とメモリの料金がかかる</span><i class="state8">RUNNING</i></div>
     <div class="ep" id="eA" data-self="1">エンドポイント</div>
   </div>
-  <div class="vm" id="vB" data-self="1" style="left:300px;top:290px">
-    <div class="top"><b>MicroVM B</b><span>vCPU とメモリの料金はかからない</span><i class="state8 off">SUSPENDED</i></div>
+  <div class="vm" id="vB" data-self="1" style="left:300px;top:308px">
+    <div class="top"><b>MicroVM B</b><span>サスペンド中で、<br>vCPU とメモリの料金はかからない</span><i class="state8">SUSPENDED</i></div>
     <div class="ep" id="eB" data-self="1">エンドポイント</div>
   </div>
-  <div class="vm" id="vC" data-self="1" style="left:300px;top:408px">
-    <div class="top"><b>MicroVM C</b><span>vCPU とメモリの料金がかかる</span><i class="state8">RUNNING</i></div>
+  <div class="vm" id="vC" data-self="1" style="left:300px;top:444px">
+    <div class="top"><b>MicroVM C</b><span>稼働中で、<br>vCPU とメモリの料金がかかる</span><i class="state8">RUNNING</i></div>
     <div class="ep" id="eC" data-self="1">エンドポイント</div>
   </div>
 
-  <!-- 利用者または AI エージェント。それぞれ自分のセッションの MicroVM のエンドポイントにアクセスする -->
-  <div class="node" id="uA" style="left:650px;top:230px"><img src="../icons/User.svg"><div class="t">利用者</div><div class="s">セッション A</div></div>
-  <div class="node" id="uB" style="left:650px;top:348px"><img src="../icons/User.svg"><div class="t">利用者</div><div class="s">セッション B</div></div>
-  <div class="node" id="uC" style="left:650px;top:466px"><img src="../icons/GenericApplication.svg"><div class="t">AI エージェント</div><div class="s">セッション C</div></div>
+  <!-- 利用者または AI エージェント。それぞれ自分のセッションの MicroVM のエンドポイントにアクセスする。
+       アイコンの中心の高さを、各エンドポイントの帯の中心（y=276, 412, 548）にそろえる -->
+  <div class="node" id="uA" style="left:650px;top:248px"><img src="../icons/User.svg"><div class="t">利用者</div><div class="s">セッション A</div></div>
+  <div class="node" id="uB" style="left:650px;top:384px"><img src="../icons/User.svg"><div class="t">利用者</div><div class="s">セッション B</div></div>
+  <div class="node" id="uC" style="left:650px;top:520px"><img src="../icons/GenericApplication.svg"><div class="t">AI エージェント</div><div class="s">セッション C</div></div>
 
-  <div class="note" style="left:0;top:588px"><b>エンドポイントの形式</b><code>https://&lt;MicroVM の ID&gt;.lambda-microvm.ap-northeast-1.on.aws</code></div>
+  <div class="note" style="left:0;top:644px"><b>エンドポイントの形式</b><code>https://&lt;MicroVM の ID&gt;.lambda-microvm.ap-northeast-1.on.aws</code></div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;
@@ -88,7 +93,7 @@ window.addEventListener('load', async () => { await document.fonts.ready;
   wire('#img', '#vB', {});
   wire('#img', '#vC', {elbow: 'hv'});
   wire('#uA', '#eA', {from: 'l', to: 'r'});
-  wire('#uB', '#eB', {from: 'l', to: 'r'});
+  wire('#uB', '#eB', {from: 'l', to: 'r', dash: true});
   wire('#uC', '#eC', {from: 'l', to: 'r'});
   document.body.dataset.ready = '1';
 });

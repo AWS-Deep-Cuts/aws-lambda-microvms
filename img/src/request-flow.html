@@ -9,16 +9,20 @@
      - エンドポイントの形式 https://<microvm-id>.lambda-microvm.<region>.on.aws（factsheet 070）
      - "By default, Lambda routes inbound traffic to port 8080 within your MicroVM." 別のポートは X-aws-proxy-port で指定し、
        allowedPorts に無いポートは 403（Lambda 開発者ガイド microvms-launching、factsheet 071, 083）
-     - hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフック）。トークンが無いときのステータスコードは公開情報に無いため「拒否される」とだけ書く -->
+     - hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフック）。トークンが無いときのステータスコードは公開情報に無いため「拒否される」とだけ書く
+     表記: 3 の検証と 4 への転送は、記事の「Lambda が〜する」（Lambda MicroVMs のサービスが自動で行う処理）と同じ書き方にする。
+     4 の見出しは箱の幅に収めるため「server.py が処理する」とし、目的語の「リクエスト」は直前の矢印の説明に書く -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 669px; }
+  #fig { width: 800px; height: 737px; }
   .node { width: 136px; }
-  .st { height: 124px; }
+  .st { height: 150px; }
   .card > .h i { font-style: normal; font-family: var(--font-mono); font-weight: 800; color: var(--hot); margin-right: 8px; }
   .card > pre b { font-weight: 800; }
+  /* 線の説明は黒にする（灰色は背景との差が小さく読みにくいため） */
+  .lbl.ink { color: var(--ink); line-height: 1.4; }
   /* MicroVM の中のポート */
   .ports { width: 100%; border-collapse: collapse; font-size: 16px; }
   .ports td { padding: 4px 12px; border-top: 1.5px solid var(--line); line-height: 1.25; }
@@ -37,13 +41,13 @@
 <div id="fig">
   <svg id="wires"></svg>
 
-  <div class="lane" style="left:0;top:0;width:800px;height:331px"><span class="lt">あなたが行う操作</span></div>
-  <div class="lane aws" style="left:0;top:359px;width:800px;height:310px"><span class="lt">AWS が自動で行う処理</span></div>
+  <div class="lane" style="left:0;top:0;width:800px;height:357px"><span class="lt">あなたが行う操作</span></div>
+  <div class="lane aws" style="left:0;top:385px;width:800px;height:352px"><span class="lt">AWS が自動で行う処理</span></div>
 
-  <!-- あなた: 認証トークンの発行 -->
-  <div class="node" id="cs" style="left:12px;top:70px"><img src="../icons/AWSCloudShell.svg"><div class="t">AWS CloudShell</div></div>
-  <div class="st" data-self="1" id="s1" style="left:156px;top:36px;width:360px"><img src="../icons/AWSLambda.svg"><i>1</i><b>CreateMicrovmAuthToken を呼ぶ</b><span>MicroVM の ID、有効期限 60 分、<br>許可するポート 8080 を指定する</span></div>
-  <div class="card" id="tok" style="left:556px;top:36px;width:228px;height:124px">
+  <!-- あなた: 認証トークンの発行。CloudShell・1・応答の中心の高さ（y=111）をそろえる -->
+  <div class="node" id="cs" style="left:12px;top:83px"><img src="../icons/AWSCloudShell.svg"><div class="t">AWS CloudShell</div></div>
+  <div class="st" data-self="1" id="s1" style="left:156px;top:36px;width:360px"><img src="../icons/AWSLambda.svg"><i>1</i><b>CreateMicrovmAuthToken を<br>呼び出す</b><span>MicroVM の ID、有効期限 60 分、<br>許可するポート 8080 を指定する</span></div>
+  <div class="card" id="tok" style="left:556px;top:49px;width:228px;height:124px">
     <div class="h">応答 ・ 認証トークン</div>
 <pre>{"authToken": {
   "<b>X-aws-proxy-auth</b>":
@@ -51,31 +55,31 @@
   </div>
 
   <!-- あなた: リクエスト -->
-  <div class="card" id="curl" style="left:16px;top:216px;width:768px;height:101px">
+  <div class="card" id="curl" style="left:16px;top:242px;width:768px;height:101px">
     <div class="h"><i>2</i>curl でエンドポイントにリクエストを送る</div>
 <pre>curl https://&lt;MicroVM の ID&gt;.lambda-microvm.ap-northeast-1.on.aws/ping \
      -H "<b id="hdr">X-aws-proxy-auth: &lt;認証トークン&gt;</b>"</pre>
   </div>
-  <div id="pTok" data-self="1" style="position:absolute;left:247.5px;top:216px;width:1px;height:1px"></div>
-  <div class="lbl" id="lTok" style="left:335px;top:177px">認証トークンをヘッダーに付ける</div>
-  <div class="lbl" style="left:412px;top:334px">HTTPS</div>
+  <div id="pTok" data-self="1" style="position:absolute;left:247.5px;top:242px;width:1px;height:1px"></div>
+  <div class="lbl ink" id="lTok" style="left:335px;top:196px">認証トークンをヘッダーに付ける</div>
+  <div class="lbl ink" style="left:412px;top:360px">HTTPS</div>
 
-  <!-- AWS -->
-  <div class="st" data-self="1" id="s3" style="left:220px;top:379px;width:360px"><img src="../icons/AWSLambda.svg"><i>3</i><b>エンドポイント</b><span>認証トークンを検証し、<br>ポートが許可されているか確認する</span></div>
+  <!-- AWS: Lambda が検証し、通ったリクエストだけをポート 8080 に転送する -->
+  <div class="st" data-self="1" id="s3" style="left:220px;top:405px;width:360px"><img src="../icons/AWSLambda.svg"><i>3</i><b>Lambda が検証する</b><span>エンドポイントに届いたリクエストの<br>認証トークンが有効か、<br>ポートが許可されているかを確認する</span></div>
 
-  <div class="lbl" style="left:412px;top:515px">ポート 8080 に転送する</div>
-  <div class="deny" id="d1" style="left:16px;top:551px;width:230px;height:104px">
+  <div class="lbl ink" style="left:412px;top:564px">リクエストを<br>ポート 8080 に転送する</div>
+  <div class="deny" id="d1" style="left:16px;top:619px;width:230px;height:104px">
     <div class="c">認証トークンが無い</div>
     <div class="r"><span class="op">→</span>拒否される</div>
   </div>
-  <div class="card" id="s4" style="left:276px;top:551px;width:248px;height:104px">
-    <div class="h"><i>4</i>MicroVM の中の server.py</div>
+  <div class="card" id="s4" style="left:276px;top:619px;width:248px;height:104px">
+    <div class="h"><i>4</i>server.py が処理する</div>
     <table class="ports">
       <tr class="hot"><td>8080</td><td>アプリ用のポート</td></tr>
       <tr><td>9000</td><td>フック用のポート</td></tr>
     </table>
   </div>
-  <div class="deny" id="d2" style="left:554px;top:551px;width:230px;height:104px">
+  <div class="deny" id="d2" style="left:554px;top:619px;width:230px;height:104px">
     <div class="c">許可していないポート</div>
     <code>X-aws-proxy-port: 9000</code>
     <div class="r"><span class="op">→</span>403</div>

@@ -1,25 +1,32 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
-<!-- image-build: CreateMicrovmImage を呼んだときに、AWS の中で順に何が起きるか（記事「イメージの作成」・README 手順 2）。
+<!-- image-build: CreateMicrovmImage を呼び出したときに、AWS の中で順に何が起きるか（記事「イメージの作成」・README 手順 2）。
      上の枠はあなたが行う操作、下の枠は AWS が自動で行う処理。
      根拠:
      - 公式チュートリアル Create your first Lambda MicroVM: "Lambda downloads your zip from Amazon S3, runs your Dockerfile,
        starts your application, and captures a Firecracker snapshot of the fully initialized state"
      - Lambda 開発者ガイド microvms-images: "If the /ready hook is enabled, Lambda waits for an HTTP 200 signal, then captures
-       a snapshot of disk and memory, including running processes."（factsheet 040, 063, 064）
-     - CreateMicrovmImage の必須入力 baseImageArn / buildRoleArn / codeArtifact / name と hooks.port。
-       イメージの状態は CREATING から CREATED になる（GetMicrovmImage、factsheet 033）。ベースイメージ al2023-1 は Amazon Linux 2023（factsheet 035）
+       a snapshot of disk and memory, including running processes."（factsheet 040, 063, 064）。DISABLED のフックは送られない（factsheet 060, 064）
+     - CreateMicrovmImage の必須入力 baseImageArn / buildRoleArn / codeArtifact / name と hooks（port と、フックごとの ENABLED/DISABLED）。
+       ハンズオンの hands-on/hooks.json は port 9000、microvmImageHooks.ready と microvmHooks の run・suspend・resume・terminate を ENABLED にする
+     - Lambda はビルド用ロールの権限で S3 から zip を読み込む（CreateMicrovmImageRequest.buildRoleArn、hands-on/setup.sh のインラインポリシー s3:GetObject）
+     - イメージの状態は CREATING から CREATED になる（GetMicrovmImage、factsheet 033）。ベースイメージ al2023-1 は Amazon Linux 2023（factsheet 035）。
+       3 の MicroVM はイメージの作成用で、記事の「ベースイメージから、イメージの作成用の MicroVM を起動する」と同じ
      - hands-on/app/Dockerfile（dnf で python3 をインストールし、server.py をコピーし、CMD で server.py を起動する）と
-       hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフックを受け、受け取ったフックをメモリに記録して 200 を返す） -->
+       hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフックを受け、受け取ったフックをメモリに記録して 200 を返す）
+     表記: フックの名前は記事・README と同じく「ready フック」と書き、パスの /aws/lambda-microvms/runtime/v1/ready と区別する。
+     4 の「Python をインストールし」は記事の Dockerfile の説明と同じ語 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 660px; }
-  .st { height: 150px; }
+  #fig { width: 800px; height: 694px; }
+  .st { height: 150px; padding: 8px 10px; }
   .st.short { height: 124px; }
   .st > b { line-height: 1.28; }
-  .st > span { line-height: 1.42; }
+  .st > b code { font-size: 18px; }
+  .st > span { line-height: 1.42; white-space: nowrap; }
+  .lbl.ink { color: var(--ink); }
   /* 3〜7 の間のイメージの状態 */
   .note { position: absolute; font-size: 16px; font-weight: 700; line-height: 1.45; }
   .chipst { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 14px;
@@ -35,25 +42,26 @@
   <svg id="wires"></svg>
 
   <div class="lane" style="left:0;top:0;width:800px;height:178px"><span class="lt">あなたが行う操作</span></div>
-  <div class="lane aws" style="left:0;top:206px;width:800px;height:454px"><span class="lt">AWS が自動で行う処理</span></div>
+  <div class="lane aws" style="left:0;top:206px;width:800px;height:488px"><span class="lt">AWS が自動で行う処理</span></div>
 
   <!-- あなた -->
   <div class="st short" data-self="1" id="s1" style="left:16px;top:40px;width:226px"><img src="../icons/AmazonSimpleStorageService.svg"><i>1</i><b>zip を S3 に<br>アップロードする</b><span>Dockerfile と server.py</span></div>
-  <div class="st short" data-self="1" id="s2" style="left:287px;top:40px;width:497px"><img src="../icons/AWSLambda.svg"><i>2</i><b>CreateMicrovmImage を呼ぶ</b><span>ベースイメージ <code>al2023-1</code>、ビルド用ロール、<br>zip の場所、フックのポート <code>9000</code> を指定する</span></div>
+  <div class="st short" data-self="1" id="s2" style="left:287px;top:40px;width:497px"><img src="../icons/AWSLambda.svg"><i>2</i><b>CreateMicrovmImage を呼び出す</b><span>ベースイメージ <code>al2023-1</code>、ビルド用ロール、<br>zip の場所、フックのポート <code>9000</code> と使うフックを指定する</span></div>
   <div id="p2" data-self="1" style="position:absolute;left:399.5px;top:163px;width:1px;height:1px"></div>
 
-  <!-- AWS -->
-  <div class="note" style="left:16px;top:254px;width:226px">3〜7 の処理の間、<br>イメージの状態は<div class="chipst" style="margin-top:10px">CREATING</div></div>
-  <div class="st short" data-self="1" id="s3" style="left:287px;top:242px;width:226px"><i>3</i><b>ベースイメージから<br>MicroVM を起動する</b><span>OS は Amazon Linux 2023</span></div>
-  <div class="st short" data-self="1" id="s4" style="left:558px;top:242px;width:226px"><i>4</i><b>Dockerfile を実行する</b><span>python3 を導入し、<br>server.py をコピーする</span></div>
-  <div class="st" data-self="1" id="s5" style="left:16px;top:414px;width:226px"><i>5</i><b>CMD で server.py を<br>起動する</b><span>ポート 8080 と 9000 で<br>リクエストを待ち受ける</span></div>
-  <div class="st" data-self="1" id="s6" style="left:287px;top:414px;width:226px"><i>6</i><b>/ready フックを送り、<br>200 が返るのを待つ</b><span>server.py はフックを<br>記録して 200 を返す</span></div>
-  <div class="st hot" data-self="1" id="s7" style="left:558px;top:414px;width:226px"><i>7</i><b>メモリとディスクの<br>スナップショットを<br>保存する</b><span>実行中のプロセスも含む</span></div>
+  <!-- AWS。2 から 3 への線の右に、Lambda が最初に行う S3 からの読み込みを書く -->
+  <div class="lbl ink" style="left:412px;top:213px">Lambda が S3 から zip を読み込む</div>
+  <div class="note" style="left:16px;top:262px;width:226px">3〜7 の処理の間、<br>イメージの状態は<div class="chipst" style="margin-top:10px">CREATING</div></div>
+  <div class="st" data-self="1" id="s3" style="left:287px;top:250px;width:226px"><i>3</i><b>ベースイメージから<br>MicroVM を起動する</b><span>イメージの作成用で、<br>OS は Amazon Linux 2023</span></div>
+  <div class="st" data-self="1" id="s4" style="left:558px;top:250px;width:226px"><i>4</i><b>Dockerfile を実行する</b><span>Python をインストールし、<br>server.py をコピーする</span></div>
+  <div class="st" data-self="1" id="s5" style="left:16px;top:448px;width:226px"><i>5</i><b>CMD で server.py を<br>起動する</b><span>ポート 8080 と 9000 で<br>リクエストを待ち受ける</span></div>
+  <div class="st" data-self="1" id="s6" style="left:287px;top:448px;width:226px"><i>6</i><b><code>ready</code> フックを送り、<br>200 が返るのを待つ</b><span>server.py はフックを<br>記録して 200 を返す</span></div>
+  <div class="st hot" data-self="1" id="s7" style="left:558px;top:448px;width:226px"><i>7</i><b>メモリとディスクの<br>スナップショットを<br>保存する</b><span>実行中のプロセスも含む</span></div>
 
-  <div class="done" id="done" style="left:16px;top:598px;width:768px;height:48px">
+  <div class="done" id="done" style="left:16px;top:632px;width:768px;height:48px">
     <b>イメージの状態が<span class="chipst">CREATED</span>になる</b><span class="sub">このイメージから MicroVM を起動できる</span>
   </div>
-  <div id="pd" data-self="1" style="position:absolute;left:670.5px;top:598px;width:1px;height:1px"></div>
+  <div id="pd" data-self="1" style="position:absolute;left:670.5px;top:632px;width:1px;height:1px"></div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;

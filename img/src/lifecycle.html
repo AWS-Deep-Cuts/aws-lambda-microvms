@@ -3,7 +3,10 @@
 <!-- lifecycle: MicroVM の状態と、状態を変える操作、状態ごとの料金（記事「サスペンドとレジューム」・README 手順 5）。
      状態は 6 つ。留まる状態（RUNNING・SUSPENDED・TERMINATED）は、見出しの帯と料金の帯を持つ箱で描く。
      途中の状態（PENDING・SUSPENDING・TERMINATING）は、その間に Lambda が行う処理を書いた箱で描く。
-     状態を変えるきっかけには、誰が行うかの札を付ける（あなた: あなたが API を呼ぶ／自動: Lambda が自動で行う）。
+     状態を変えるきっかけには、誰が行うかの札を付ける。右上の凡例のとおり 3 種類:
+       あなた（灰色）: あなたが API を呼び出す
+       自動（差し色の塗り）: Lambda が自動で行う。設定に関係なく働く（最長時間による終了）
+       自動（差し色の枠）: アイドルポリシーで設定したときだけ、Lambda が自動で行う
      根拠:
      - 状態の enum MicrovmState: PENDING, RUNNING, SUSPENDING, SUSPENDED, TERMINATING, TERMINATED。RESUMING は無い
        （botocore lambda-microvms/2025-09-09/service-2.json、factsheet 055）
@@ -13,48 +16,57 @@
        ResumeMicrovm: "The MicroVM must be in SUSPENDED state."（service-2.json、factsheet 057）
      - IdlePolicy: maxIdleDurationSeconds（リクエストが無いまま、この秒数がたつとサスペンド）、suspendedDurationSeconds（サスペンドが
        この秒数続くと終了）、autoResumeEnabled（サスペンド中にリクエストが届くとレジューム）。"Idle time is measured by inbound traffic
-       through the MicroVM proxy endpoint"（service-2.json の IdlePolicy、factsheet 058）
+       through the MicroVM proxy endpoint"（service-2.json の IdlePolicy、factsheet 058）。
+       アイドルポリシーを指定しないと、自動のサスペンドと終了は行われない（公式 skill の references/lifecycle-model.md
+       "omit it to disable idle-based auto-suspend entirely"、factsheet 058）。自動のレジュームには autoResumeEnabled=true が要る
      - RunMicrovmRequest.maximumDurationInSeconds: "The maximum duration in seconds that the MicroVM can exist before being terminated
-       by the platform." RUNNING と SUSPENDED の時間の合計で数える（service-2.json、docs microvms-launching、factsheet 056）
-     - フック: /run はスナップショットからの起動の後に送られ、200 が返ると RUNNING になる（factsheet 061）。/suspend は SUSPENDING の間、
-       保存の前に送られる。/resume の間は SUSPENDED のままで、200 が返ると RUNNING になる。/terminate は終了の直前に送られる
-       （docs microvms-launching、factsheet 065、公式 skill aws-lambda-microvms の references/lifecycle-model.md）
+       by the platform." RUNNING と SUSPENDED の時間の合計で数える。上限と既定は 8 時間（service-2.json、docs microvms-launching、factsheet 056）
+     - フック: run はスナップショットからの起動の後に送られ、200 が返ると RUNNING になる（factsheet 061）。suspend は SUSPENDING の間、
+       保存の前に送られる。resume の間は SUSPENDED のままで、200 が返ると RUNNING になる。terminate は最終的な終了のときだけ送られ、
+       サスペンドのときには送られない（docs microvms-launching、factsheet 065、公式 skill aws-lambda-microvms の references/lifecycle-model.md）。
+       SUSPENDED から終了するときに terminate フックが送られるかは公開情報で確かめられないため、帯には RUNNING から終了するときだけを書く
      - 料金: "Suspended MicroVMs incur snapshot storage charges but not compute charges."、TERMINATED は料金がかからない（AWS Lambda FAQ、factsheet 097）
      - 状態の遷移: 公式 skill の references/lifecycle-model.md「MicroVM state machine」
-     省略したもの: PENDING と SUSPENDING からの TerminateMicrovm、/run フックの失敗による終了、スナップショットの読み書きの料金（billing の図で扱う）。
-     「アイドルポリシー」という語は記事で図の後に定義するため、図では条件を言葉で書く。線はすべて水平か垂直 -->
+     表記: フックの名前は記事・README と同じく「run フック」のように書く（パスの /aws/lambda-microvms/runtime/v1/run と区別する）。
+     札の文字は 19px の太字にして、白い文字と背景の差を大きな文字の基準（3:1）以上にする。
+     省略したもの: PENDING と SUSPENDING からの TerminateMicrovm、run フックの失敗による終了、スナップショットの読み書きの料金（billing の図で扱う）。
+     線はすべて水平か垂直 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 744px; }
+  #fig { width: 800px; height: 844px; }
 
-  /* 状態を変えるきっかけ。1 行ごとに、誰が行うかの札（あなた／自動）を付ける */
-  .trig { position: absolute; left: 272px; display: flex; flex-direction: column; gap: 6px; }
+  /* 状態を変えるきっかけ。1 行ごとに、誰が行うかの札を付ける */
+  .trig { position: absolute; display: flex; flex-direction: column; gap: 6px; }
   .row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-  .who { flex: none; width: 56px; text-align: center; font-size: 16px; font-weight: 900; line-height: 26px; color: #fff; background: var(--grey); }
+  .who { flex: none; width: 72px; height: 30px; text-align: center; font-size: 19px; font-weight: 900; line-height: 30px; color: #fff; background: var(--grey); }
   .who.auto { background: var(--hot); }
-  .row .api { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
-  .row .cond { font-size: 16px; font-weight: 900; }
-  .trig .hook { font-size: 16px; font-weight: 500; line-height: 1.45; white-space: nowrap; margin-top: 2px; }
+  .who.idle { background: #fff; color: var(--hot); border: 2px solid var(--hot); line-height: 26px; }
+  .row .api { font-family: var(--font-mono); font-weight: 800; font-size: 16px; }
+  .row .cond { font-size: 17px; font-weight: 900; line-height: 1.35; }
+  .trig .hook { font-size: 16px; font-weight: 500; line-height: 1.45; white-space: nowrap; }
 
   /* 札の意味 */
-  .legend { position: absolute; right: 0; top: 0; border: 2px solid var(--line); background: #fff; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
-  .legend .row span:last-child { font-size: 16px; font-weight: 500; }
+  .legend { position: absolute; right: 0; top: 0; border: 2px solid var(--line); background: #fff; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .legend .row span:last-child { font-size: 16px; font-weight: 500; line-height: 1.4; }
 
   /* 途中の状態（その間に Lambda が処理を行う） */
   .mid { position: absolute; border: 3px solid var(--ink); background: #fff; padding: 8px 12px; }
   .mid b { display: block; font-family: var(--font-mono); font-weight: 800; font-size: 18px; line-height: 1.3; }
   .mid span { display: block; margin-top: 4px; font-size: 16px; font-weight: 500; line-height: 1.45; }
   .mid.bar { display: flex; align-items: center; justify-content: center; gap: 20px; padding: 0 12px; }
-  .mid.bar span { margin-top: 0; }
+  .mid.bar span { margin-top: 0; white-space: nowrap; }
+  .mid .st8 { display: inline-block; margin-top: 0; }
   code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+  /* 文中の状態の名前（枠付きの等幅の札。ほかの図と同じ形） */
+  .st8 { display: inline-block; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1; border: 2px solid var(--ink); padding: 2px 6px; margin-right: 2px; }
 
   /* 留まる状態：見出しの帯＋説明＋料金の帯（料金の帯は箱の下端にそろえる） */
   .stay { position: absolute; border: 3px solid var(--ink); background: #fff; display: flex; flex-direction: column; }
   .stay > .h { background: var(--ink); color: #fff; font-family: var(--font-mono); font-weight: 800; font-size: 18px; padding: 7px 12px; line-height: 1.3; }
   .stay > .d { padding: 8px 12px; font-size: 16px; font-weight: 500; line-height: 1.45; }
-  .stay > .fee { margin-top: auto; border-top: 2px solid var(--ink); background: var(--bone); padding: 6px 12px; font-size: 16px; font-weight: 900; line-height: 1.45; }
+  .stay > .fee { margin-top: auto; border-top: 2px solid var(--ink); background: var(--bone); padding: 6px 10px 6px 12px; font-size: 17px; font-weight: 900; line-height: 1.4; white-space: nowrap; }
   .stay.end { border-color: var(--grey); }
   .stay.end > .h { background: var(--grey); }
   .stay.end > .fee { border-top-color: var(--grey); }
@@ -66,59 +78,60 @@
   <svg id="wires"></svg>
 
   <div class="legend">
-    <div class="row"><span class="who">あなた</span><span>あなたが API を呼ぶ</span></div>
+    <div class="row"><span class="who">あなた</span><span>あなたが API を呼び出す</span></div>
     <div class="row"><span class="who auto">自動</span><span>Lambda が自動で行う</span></div>
+    <div class="row"><span class="who idle">自動</span><span>アイドルポリシーで設定した<br>ときだけ、Lambda が自動で行う</span></div>
   </div>
 
-  <!-- 起動。RunMicrovm の行は PENDING の中心の高さ（y=49） -->
-  <div class="mid" id="pending" style="left:0;top:0;width:256px;height:98px"><b>PENDING</b><span>Lambda がスナップショットを<br>復元し、<code>/run</code> フックを送る</span></div>
-  <div class="trig" id="tRun" style="left:290px;top:36px"><div class="row"><span class="who">あなた</span><span class="api">RunMicrovm</span></div></div>
+  <!-- 起動。RunMicrovm から PENDING の上端へ下ろす（x=134） -->
+  <div class="trig" id="tRun" style="left:46px;top:0"><div class="row"><span class="who">あなた</span><span class="api">RunMicrovm</span></div></div>
+  <div class="mid" id="pending" style="left:0;top:68px;width:268px;height:98px"><b>PENDING</b><span>Lambda がスナップショットを<br>復元し、<code>run</code> フックを送る</span></div>
 
-  <!-- 実行中とサスペンド。RUNNING と SUSPENDING の中心の高さ（y=202）をそろえ、サスペンドの線を水平にする -->
-  <div class="stay" id="running" style="left:0;top:141px;width:256px;height:122px">
+  <!-- 実行中とサスペンド。RUNNING と SUSPENDING の中心の高さ（y=275）をそろえ、サスペンドの線を水平にする -->
+  <div class="stay" id="running" style="left:0;top:214px;width:268px;height:122px">
     <div class="h">RUNNING</div>
     <div class="d">アプリがリクエストを処理する</div>
     <div class="fee">vCPU とメモリの料金がかかる</div>
   </div>
-  <div class="trig" id="tSus" style="top:134px">
+  <div class="trig" id="tSus" style="left:284px;top:183px">
     <div class="row"><span class="who">あなた</span><span class="api">SuspendMicrovm</span></div>
-    <div class="row"><span class="who auto">自動</span><span class="cond">一定時間リクエストが無い</span></div>
+    <div class="row"><span class="who idle">自動</span><span class="cond">設定した時間、<br>リクエストが無い</span></div>
   </div>
-  <div class="mid" id="suspending" style="left:544px;top:141px;width:256px;height:122px"><b>SUSPENDING</b><span>Lambda が <code>/suspend</code> フックを<br>送り、メモリとディスクの<br>内容を保存する</span></div>
-  <div class="stay" id="suspended" style="left:544px;top:303px;width:256px;height:144px">
+  <div class="mid" id="suspending" style="left:532px;top:214px;width:268px;height:122px"><b>SUSPENDING</b><span>Lambda が <code>suspend</code> フックを<br>送り、メモリとディスクの<br>内容を保存する</span></div>
+  <div class="stay" id="suspended" style="left:532px;top:384px;width:268px;height:144px">
     <div class="h">SUSPENDED</div>
     <div class="d">MicroVM は一時停止している</div>
     <div class="fee">スナップショットの保存料金<br>だけがかかる</div>
   </div>
 
-  <!-- レジューム。SUSPENDED の中心の高さ（y=375）から RUNNING の下端へ戻る。
-       RESUMING という状態は無い（SUSPENDED のまま /resume フックが送られ、200 が返ると RUNNING） -->
-  <div class="trig" id="tRes" style="top:274px">
+  <!-- レジューム。SUSPENDED の中心の高さ（y=456）から RUNNING の下端（x=205）へ戻る。
+       RESUMING という状態は無い（SUSPENDED のまま resume フックが送られ、200 が返ると RUNNING） -->
+  <div class="trig" id="tRes" style="left:220px;top:349px">
     <div class="row"><span class="who">あなた</span><span class="api">ResumeMicrovm</span></div>
-    <div class="row"><span class="who auto">自動</span><span class="cond">リクエストが届く</span></div>
-    <div class="hook">Lambda が <code>/resume</code> フックを送る</div>
+    <div class="row"><span class="who idle">自動</span><span class="cond">リクエストが届く</span></div>
+    <div class="hook">Lambda が <code>resume</code> フックを送る</div>
   </div>
-  <div class="pt" id="pRunB" data-self="1" style="left:199.5px;top:262px"></div>
+  <div class="pt" id="pRunB" data-self="1" style="left:204.5px;top:335px"></div>
 
-  <!-- 終了。RUNNING（x=128）と SUSPENDED（x=672）の下端から、まっすぐ TERMINATING に下ろす -->
-  <div class="trig" id="tTer" style="top:465px">
+  <!-- 終了。RUNNING（x=134）と SUSPENDED（x=666）の下端から、まっすぐ TERMINATING に下ろす -->
+  <div class="trig" id="tTer" style="left:284px;top:548px">
     <div class="row"><span class="who">あなた</span><span class="api">TerminateMicrovm</span></div>
-    <div class="row"><span class="who auto">自動</span><span class="cond">起動から最長時間が経過</span></div>
-    <div class="row"><span class="who auto">自動</span><span class="cond">サスペンドが一定時間続く</span></div>
+    <div class="row"><span class="who auto">自動</span><span class="cond">起動から最長時間が経過する</span></div>
+    <div class="row"><span class="who idle">自動</span><span class="cond">サスペンドが設定した時間続く</span></div>
   </div>
-  <div class="pt" id="pTerL" data-self="1" style="left:127.5px;top:262px"></div>
-  <div class="pt" id="pTerR" data-self="1" style="left:671.5px;top:446px"></div>
-  <div class="mid bar" id="terminating" style="left:0;top:573px;width:800px;height:48px"><b>TERMINATING</b><span>Lambda が <code>/terminate</code> フックを送る</span></div>
-  <div class="pt" id="pBarL" data-self="1" style="left:127.5px;top:573px"></div>
-  <div class="pt" id="pBarR" data-self="1" style="left:671.5px;top:573px"></div>
-  <div class="stay end" id="terminated" style="left:270px;top:661px;width:260px">
+  <div class="pt" id="pTerL" data-self="1" style="left:133.5px;top:335px"></div>
+  <div class="pt" id="pTerR" data-self="1" style="left:665.5px;top:527px"></div>
+  <div class="mid bar" id="terminating" style="left:0;top:668px;width:800px;height:48px"><b>TERMINATING</b><span><span class="st8">RUNNING</span> から終了するとき、Lambda が <code>terminate</code> フックを送る</span></div>
+  <div class="pt" id="pBarL" data-self="1" style="left:133.5px;top:668px"></div>
+  <div class="pt" id="pBarR" data-self="1" style="left:665.5px;top:668px"></div>
+  <div class="stay end" id="terminated" style="left:270px;top:760px;width:260px">
     <div class="h">TERMINATED</div>
     <div class="fee">料金はかからない</div>
   </div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;
-  wire('#tRun', '#pending', {from: 'l', to: 'r'});
+  wire('#tRun', '#pending', {from: 'b', to: 't'});
   wire('#pending', '#running', {from: 'b', to: 't'});
   wire('#running', '#suspending', {from: 'r', to: 'l'});
   wire('#suspending', '#suspended', {from: 'b', to: 't'});
