@@ -320,7 +320,24 @@ def main() -> None:
         if not line.strip():
             continue
 
-        if line.startswith(":"):
+        try:
+            if line.startswith(":"):
+                if handle_command(sb, line):
+                    break
+            else:
+                print_result(sb.exec_code(read_block(line)))
+        except ClientError as e:
+            err = e.response["Error"]
+            print(f"  ❌ AWS API エラー: {err.get('Code')}: {err.get('Message', '')[:200]}")
+            print("  （:status で状態を確認してください。眠っている microVM にもう一度 :sleep はできません）")
+        except (RuntimeError, OSError) as e:
+            print(f"  ❌ {e}")
+
+
+def handle_command(sb: Sandbox, line: str) -> bool:
+    """':' で始まるコマンドを処理する。終了するときだけ True を返す"""
+    if True:  # noqa: 元のインデントを保つためのブロック
+        if True:
             cmd, _, arg = line[1:].partition(" ")
             cmd = cmd.strip().lower()
             if cmd in ("help", "h", "?"):
@@ -328,16 +345,19 @@ def main() -> None:
             elif cmd == "ai":
                 if not arg.strip():
                     print("  使い方: :ai <お願い>   例: :ai 1 から 100 までの素数を表示して")
-                    continue
+                    return False
                 print("  🤖 Bedrock にコードを書いてもらっています…")
                 code = ask_ai(sb.region, arg.strip())
                 if not code:
-                    continue
+                    return False
                 print("  ── AI が書いたコード ──")
                 for n, l in enumerate(code.splitlines(), 1):
                     print(f"  {n:3d} | {l}")
                 print("  ──────────────────────")
-                answer = input("  このコードを microVM の中で実行しますか？ [y/N] ").strip().lower()
+                try:
+                    answer = input("  このコードを microVM の中で実行しますか？ [y/N] ").strip().lower()
+                except EOFError:
+                    answer = "n"
                 if answer == "y":
                     print_result(sb.exec_code(code))
                 else:
@@ -349,7 +369,7 @@ def main() -> None:
             elif cmd == "wake":
                 if sb.state()["state"] != "SUSPENDED":
                     print(f"  眠っていません（state: {sb.state()['state']}）")
-                    continue
+                    return False
                 print("  ⏰ レジュームしています…", end="", flush=True)
                 ms = sb.resume()
                 print(f" RUNNING（/ping が返るまで {ms} ms）")
@@ -387,19 +407,19 @@ def main() -> None:
                 ms = sb.run()
                 print(f" 起動しました: {sb.microvm_id}（/ping まで {ms} ms）")
             elif cmd in ("quit", "exit", "q"):
-                answer = input("  microVM を終了しますか？（n なら次回 sandbox.py が再利用します）[Y/n] ").strip().lower()
+                try:
+                    answer = input("  microVM を終了しますか？（n なら次回 sandbox.py が再利用します）[Y/n] ").strip().lower()
+                except EOFError:
+                    answer = "y"
                 if answer != "n":
                     sb.terminate()
                     print("  終了しました。後片付けは bash ./cleanup.sh で行ってください。")
                 else:
                     print(f"  microVM は残しています（最長 60 分で自動終了。概算 ${sb.approx_cost():.5f}）")
-                break
+                return True
             else:
                 print(f"  不明なコマンド :{cmd}（:help で一覧）")
-            continue
-
-        code = read_block(line)
-        print_result(sb.exec_code(code))
+    return False
 
 
 if __name__ == "__main__":
