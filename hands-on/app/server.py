@@ -10,7 +10,7 @@
     GET  /random … random.random() / os.urandom()（同じスナップショット由来の microVM で一致するかを見る）
     POST /exec   … {"code": "..."} を永続的な名前空間で exec し、stdout と例外を返す
   HOOK_PORT (既定 9000): Lambda MicroVMs のライフサイクルフック
-    POST /ready /validate /run /suspend /resume /terminate を受け取り、時刻と body を記録して 200 を返す
+    POST /aws/lambda-microvms/runtime/v1/{ready,validate,run,suspend,resume,terminate} を受け取り、時刻と body を記録して 200 を返す
 
 環境変数 APP_PORT / HOOK_PORT で変更できる。ログは標準出力（CloudWatch Logs に流れる）。
 """

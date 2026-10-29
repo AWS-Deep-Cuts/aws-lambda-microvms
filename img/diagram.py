@@ -19,11 +19,13 @@ with Diagram("", show=False, filename="architecture", outformat="png", direction
     with Cluster("AWS Lambda MicroVMs（東京）", graph_attr=ATTR):
         with Cluster("microVM（使い捨ての VM）", graph_attr=ATTR):
             vm = Lambda("Python サンドボックス\n（AI のコードはここで動く）")
-        image = Lambda("MicroVM イメージ\n= 起動済みメモリの\nスナップショット")
+        image = Lambda("MicroVM イメージ\n= 起動済みのメモリと\nディスクのスナップショット")
         s3 = S3("app.zip\n(Dockerfile + server.py)")
+    you >> Edge(style="invis") >> s3   # レイアウト用: あなたを左端に置く
     you >> Edge(label=":ai お願い") >> ai
     ai >> Edge(label="Python コード", style="dashed") >> you
     you >> Edge(label="コードを送って実行\n(HTTPS + 認証トークン)") >> vm
-    you >> Edge(label="sleep / wake / new\n(suspend / resume / run)", style="dotted") >> image
+    you >> Edge(label=":sleep / :wake\n(suspend / resume)", style="dotted") >> vm
+    you >> Edge(headlabel=":new（run）\nイメージから解凍", labeldistance="5.5", labelangle="-55", style="dotted") >> image
     s3 >> Edge(label="setup.sh: 起動して凍結") >> image
     image >> Edge(label="数秒で解凍") >> vm

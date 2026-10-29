@@ -14,13 +14,20 @@ source "${RESOURCE_FILE}"
 source "${SCRIPT_DIR}/lib.sh"
 mkdir -p "${SCRIPT_DIR}/output"
 readonly INGRESS_CONNECTOR="arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:ALL_INGRESS"
+declare -a IDS=() ENDPOINTS=() TOKENS=()
+# 途中で失敗しても、起動した microVM は必ず終了する（最長 600 秒で自動終了もする）
+cleanup_twins() {
+  for id in "${IDS[@]}"; do
+    [[ -n "${id}" ]] && aws lambda-microvms terminate-microvm --microvm-identifier "${id}" --region "${REGION}" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup_twins EXIT
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  AWS Deep Cuts - Lambda MicroVMs: 双子の microVM と乱数"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "[1/3] 同じイメージから microVM を 2 台起動..."
-declare -a IDS=() ENDPOINTS=() TOKENS=()
 for i in 1 2; do
   RUN_JSON=$(aws lambda-microvms run-microvm --region "${REGION}" --image-identifier "${IMAGE_ARN}" \
     --execution-role-arn "${EXEC_ROLE_ARN}" --ingress-network-connectors "${INGRESS_CONNECTOR}" --maximum-duration-in-seconds 600 --output json)
@@ -37,13 +44,13 @@ echo ""
 echo "[2/3] それぞれの /random を 1 回ずつ取得..."
 R1=$(app_call "${ENDPOINTS[1]}" "${TOKENS[1]}" GET /random)
 R2=$(app_call "${ENDPOINTS[2]}" "${TOKENS[2]}" GET /random)
-python3 - "${R1}" "${R2}" <<'EOF' | tee -a /dev/stderr >/dev/null
+python3 - "${R1}" "${R2}" <<'PYEOF'
 import json, sys
 a, b = json.loads(sys.argv[1]), json.loads(sys.argv[2])
 print(f"  {'項目':<16} {'#1':<36} {'#2':<36} 一致?")
 for key in ("boot_id", "random_random", "os_urandom_hex", "uuid4"):
     print(f"  {key:<16} {str(a[key]):<36} {str(b[key]):<36} {'★一致' if a[key] == b[key] else '不一致'}")
-EOF
+PYEOF
 {
   echo "## twins.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) (${REGION})"
   echo ""
@@ -56,9 +63,9 @@ EOF
 echo ""
 
 echo "[3/3] 2 台を終了..."
-for i in 1 2; do
-  aws lambda-microvms terminate-microvm --microvm-identifier "${IDS[i]}" --region "${REGION}"
-done
+cleanup_twins
+IDS=()
+echo "  完了（結果は ${RESULTS} に追記しました）"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ 双子の microVM の比較が完了しました！"

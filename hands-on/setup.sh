@@ -27,13 +27,20 @@ if [[ -f "${RESOURCE_FILE}" ]]; then
   exit 1
 fi
 if ! aws lambda-microvms run-microvm --generate-cli-skeleton input >/dev/null 2>&1; then
-  echo "❌ Error: この AWS CLI は lambda-microvms コマンドに対応していません。" >&2
-  echo "   AWS CLI v2 を最新版に更新してください。現在: $(aws --version 2>&1)" >&2
+  echo "❌ Error: この AWS CLI は lambda-microvms コマンドに対応していません（v2.35.10 以降が必要）。現在: $(aws --version 2>&1)" >&2
+  echo "   CloudShell の AWS CLI は最新版とは限りません。README の「前提条件」の手順でホームディレクトリに最新版を入れてください:" >&2
+  echo '   curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip && unzip -q -o /tmp/awscliv2.zip -d /tmp \\' >&2
+  echo '     && /tmp/aws/install --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin" --update && export PATH="$HOME/.local/bin:$PATH"' >&2
   exit 1
 fi
 for cmd in zip curl python3; do
   command -v "${cmd}" >/dev/null || { echo "❌ Error: ${cmd} が見つかりません。" >&2; exit 1; }
 done
+if ! python3 -c "import boto3; boto3.client('lambda-microvms', region_name='${REGION}')" >/dev/null 2>&1; then
+  echo "❌ Error: この boto3 は lambda-microvms に対応していません（1.43.35 以降が必要。sandbox.py が使います）。" >&2
+  echo "   python3 -m pip install --user --upgrade boto3  を実行してから、もう一度 bash ./setup.sh を実行してください。" >&2
+  exit 1
+fi
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || {
   echo "❌ Error: AWS 認証情報が取得できません。AWS CLI の設定を確認してください。" >&2
   exit 1
@@ -44,7 +51,7 @@ echo ""
 # ─── [2/7] ベースイメージの確認 ────────────────────────────────
 echo "[2/7] Lambda 管理のベースイメージを確認..."
 BASE_IMAGE_ARN=$(aws lambda-microvms list-managed-microvm-images --region "${REGION}" \
-  --query 'items[?contains(imageArn, `al2023`)].imageArn | [0]' --output text)
+  --query 'sort_by(items[?contains(imageArn, `al2023`)], &createdAt)[-1].imageArn' --output text)
 if [[ -z "${BASE_IMAGE_ARN}" || "${BASE_IMAGE_ARN}" == "None" ]]; then
   echo "❌ Error: ベースイメージが見つかりません。リージョン ${REGION} で Lambda MicroVMs が使えるか確認してください。" >&2
   aws lambda-microvms list-managed-microvm-images --region "${REGION}" --output table || true
@@ -174,8 +181,10 @@ for _ in $(seq 1 60); do
   case "${STATE}" in
     CREATED) break ;;
     CREATE_FAILED)
-      echo "❌ Error: イメージのビルドに失敗しました。CloudWatch Logs の ${LOG_GROUP} を確認してください。" >&2
-      aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" --region "${REGION}" --output json >&2 || true
+      echo "❌ Error: イメージのビルドに失敗しました。CloudWatch Logs の ${LOG_GROUP} と、下の stateReason を確認してください。" >&2
+      aws lambda-microvms list-microvm-image-versions --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
+        --query 'items[].{imageVersion:imageVersion,state:state,stateReason:stateReason}' --output table >&2 || true
+      echo "   stateReason が S3_ACCESS_DENIED なら IAM ロールの伝播待ちが原因のことがあります。bash ./cleanup.sh のあと、もう一度 bash ./setup.sh を実行してください。" >&2
       exit 1 ;;
     *) printf '.'; sleep 15 ;;
   esac

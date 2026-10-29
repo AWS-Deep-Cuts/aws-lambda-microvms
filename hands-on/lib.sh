@@ -1,6 +1,5 @@
 #!/bin/bash
-# AWS Deep Cuts - Lambda MicroVMs: run.sh / idle.sh / cleanup.sh が共有する関数
-# （source して使う。単体では実行しない）
+# AWS Deep Cuts - Lambda MicroVMs: twins.sh が source して使う共通関数（単体では実行しない）
 
 # ミリ秒単位の現在時刻
 now_ms() { date +%s%3N; }
@@ -33,6 +32,7 @@ create_app_token() {
 # エンドポイントの API を叩く: app_call <endpoint> <token> <method> <path> [json-body]
 app_call() {
   local endpoint="$1" token="$2" method="$3" path="$4" body="${5:-}"
+  [[ "${endpoint}" == http* ]] || endpoint="https://${endpoint}"   # スキーム無しで返ってきた場合に備える
   if [[ -n "${body}" ]]; then
     curl -sS --max-time 30 -X "${method}" "${endpoint}${path}" \
       -H "X-aws-proxy-auth: ${token}" -H "X-aws-proxy-port: ${APP_PORT}" \
@@ -46,6 +46,7 @@ app_call() {
 # /ping が 200 を返すまで待ち、かかったミリ秒を標準出力に返す（最大 $3 秒）
 wait_ping_ms() {
   local endpoint="$1" token="$2" limit="${3:-180}"
+  [[ "${endpoint}" == http* ]] || endpoint="https://${endpoint}"
   local started; started=$(now_ms)
   while (( ($(now_ms) - started) / 1000 < limit )); do
     local code
