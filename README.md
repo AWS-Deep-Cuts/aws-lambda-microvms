@@ -1,24 +1,20 @@
 このリポジトリは AWS Deep Cuts の、AWS Lambda MicroVMs に関するハンズオンコンテンツです。
 
 <!-- TODO: 記事公開後にリンクを追加 -->
-<!-- AWS Lambda MicroVMs の解説記事(AWS Builder Center)は[こちら]() -->
+<!-- AWS Lambda MicroVMs の解説記事(Qiita)は[こちら]() -->
 
 解説記事の原稿は [article/aws-lambda-microvms.md](./article/aws-lambda-microvms.md) にあります。
 
-> **Note**: このハンズオンは 2026 年 6 月に GA となった **AWS Lambda MicroVMs** を使用します。東京リージョン（`ap-northeast-1`）で実施します（大阪リージョンは 2026 年 10 月時点で未対応です）。microVM は **ARM64（Graviton）のみ** です。
->
-> AWS CLI は `aws lambda-microvms` サブコマンドに対応した **v2.35.10 以降** が必要です。CloudShell には最新版が入っています。
+> **Note**: 2026 年 6 月に GA となった **AWS Lambda MicroVMs** を、東京リージョン（`ap-northeast-1`）で使います。AWS CLI は `aws lambda-microvms` に対応した **v2.35.10 以降** が必要です（CloudShell には最新版が入っています）。`:ai` コマンドでは Amazon Bedrock の **Amazon Nova 2 Lite**（`amazon.nova-2-lite-v1:0`、東京リージョンで直接呼び出し可）を使います。Bedrock が使えない場合はその機能だけスキップされます。
 
 > ⚠️ **コストに関する注意**
 >
-> このハンズオンで作成するリソースの料金は、microVM の稼働（vCPU 秒 + メモリ GiB 秒）、スナップショットの保存（GiB 時間、**最低 1 週間分**）、スナップショットの読み書き（GiB）です。最小クラス（ベースライン 0.25 vCPU / 0.5 GB）の microVM 1 台は、稼働中 **約 $0.04/時間** です（東京の単価 vCPU 秒 $0.0000322421、GB 秒 $0.0000042688 で計算。2026 年 10 月時点）。
->
-> スクリプトで起動する microVM はすべて **最長 15〜30 分で自動終了** する設定にしているので、放置しても microVM の課金は止まります。残るのはイメージ（スナップショット）の保存料金だけです。
+> 起動する microVM は最小クラス（0.25 vCPU / 0.5 GB）で **約 $0.04/時間**、しかも **5 分放置で自動サスペンド、60 分で自動終了** する設定です。残るのはイメージ（スナップショット）の保存料金（最低 1 週間分、約 $0.07）だけです。`:ai` 1 回あたりの Bedrock の料金は 1 円未満です。
 >
 > | 放置期間 | 概算コスト |
 > | --- | --- |
-> | 1日 | 約 **$0.1**（約 15 円。ハンズオン全体の実行 + スナップショット保存 1 週間分） |
-> | 1週間 | 約 **$0.1**（スナップショットの保存は最低 1 週間分が課金されるため、1 日放置と変わりません） |
+> | 1日 | 約 **$0.1**（約 15 円） |
+> | 1週間 | 約 **$0.1**（イメージの保存は最低 1 週間分が課金されるため、1 日放置と変わりません） |
 >
 > **検証が終わったら速やかに後片付けを実施してください。**
 
@@ -29,27 +25,42 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
 
 そこで AWS Deep Cuts シリーズでは、**前提知識も含めた分かりやすいサービス解説** と **手順通りに進めれば誰でも再現できるハンズオン** を提供します！
 
+# このハンズオンの物語
+
+「AI にコードを書かせて、そのまま実行させたい」。生成 AI を使っていると、誰もが一度は思います。でも、どこで実行しますか？
+
+- 自分の PC で動かす → AI が `rm -rf` を書いてきたら終わりです。
+- Lambda 関数で動かす → 15 分で終わるうえ、リクエストごとに状態が消えます。「さっき定義した変数、覚えてる？」ができません。
+- コンテナで動かす → ホストとカーネルを共有するので、隔離としては弱めです。
+- EC2 を立てる → 起動に 1 分、1 人 1 台用意するには高くて遅いです。
+
+欲しいのは、**数秒で起動し、途中の状態を保ったまま眠らせられ、壊れたら捨てられる、自分専用の小さな VM** です。それが Lambda MicroVMs です。
+
+このハンズオンでは、CloudShell から microVM の中の Python と会話できる「サンドボックス」を作り、AI（Amazon Bedrock）に書かせたコードをその中で動かします。わざと壊して、捨てて、新しいのを数秒で手に入れるところまで体験します。
+
 # ハンズオンのゴール
 
-このハンズオンでは、Python の「状態を持つサンドボックス」を Lambda MicroVMs 上に作り、**microVM を眠らせて起こすと、メモリの中身がそのまま残っている** ことを確かめます。あわせて、以下の観点を確認します。
-
-1. イメージのビルドが「アプリを起動してからメモリとディスクを凍結する」処理であること（スナップショットのサイズが見える）
-2. スナップショットからの起動にかかる時間
-3. サスペンド → レジュームで、変数・プロセス・フックの履歴が残っていること、およびレジュームにかかる時間
-4. 眠っている間、microVM の中の時計がどう進むか
-5. アイドルポリシーによる自動サスペンドと、リクエストによる自動レジューム
-6. 認証トークンの「ポートのスコープ」と、egress コネクタの有無によるインターネット到達性
-7. （発展）同じスナップショットから起動した 2 台の microVM が、同じ乱数を出すかどうか
-8. （発展）シェルで中に入り、アプリが「microVM の中のコンテナ」として動いていること
+1. **会話する** — `>>>` プロンプトに Python を書くと、microVM の中で実行され、変数が残ること
+2. **AI に書かせて、VM の中で動かす** — `:ai` で Bedrock にコードを書かせ、確認してから microVM で実行すること。危ないコードでも、あなたの CloudShell は無傷であること
+3. **眠らせても覚えている** — `:sleep` でサスペンドし、`:wake` で起こすと変数がそのまま残っていること（眠っている間はコンピュート料金がかからない）
+4. **壊しても捨てればいい** — `:break` でサンドボックスのプロセスを殺し、`:new` で新しい microVM を数秒で手に入れること
+5. （発展）**同じ冷凍食品は同じ味** — 同じイメージから起動した 2 台が同じ乱数を出すかどうか
 
 # ハンズオン手順
 
 以降の手順は、ハンズオン用に用意した AWS アカウントで実施してください。
 
+## 構築するアーキテクチャ
+
+![構成図](img/architecture.png)
+
+- `setup.sh` が、Python 標準ライブラリだけで書いた小さなサーバー（`hands-on/app/server.py`。Python コードを受け取って実行し、変数を保持する）を **MicroVM イメージ** にします。イメージの正体は「アプリを起動して初期化が終わった状態のメモリとディスクを丸ごと凍結したもの」です。
+- `sandbox.py` が、そのイメージから microVM を 1 台起動（= 解凍）し、専用の HTTPS エンドポイント越しにコードを送ります。`:ai` では Amazon Bedrock にコードを書かせ、あなたが確認してから同じ経路で実行します。
+
 ## 前提条件
 
-- AWS CloudShell（東京リージョン）。`aws`、`curl`、`python3`、`zip` を使います
-- 実行する IAM プリンシパルに、Lambda MicroVMs・IAM・S3・CloudWatch Logs の操作権限があること（`AdministratorAccess` 相当で実施するのが簡単です）
+- AWS CloudShell（**東京リージョン**）。`aws`、`python3`、`zip` を使います
+- 実行する IAM プリンシパルに、Lambda MicroVMs・IAM・S3・CloudWatch Logs・Bedrock の操作権限があること（`AdministratorAccess` 相当で実施するのが簡単です）
 
 <details>
 <summary>最小権限に近い IAM ポリシー例（実行者用）</summary>
@@ -62,32 +73,19 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
       "Sid": "LambdaMicroVMs",
       "Effect": "Allow",
       "Action": [
-        "lambda:ListManagedMicrovmImages",
-        "lambda:ListManagedMicrovmImageVersions",
-        "lambda:CreateMicrovmImage",
-        "lambda:GetMicrovmImage",
-        "lambda:GetMicrovmImageVersion",
-        "lambda:ListMicrovmImageVersions",
-        "lambda:ListMicrovmImageBuilds",
-        "lambda:GetMicrovmImageBuild",
-        "lambda:DeleteMicrovmImage",
-        "lambda:DeleteMicrovmImageVersion",
-        "lambda:RunMicrovm",
-        "lambda:GetMicrovm",
-        "lambda:ListMicrovms",
-        "lambda:SuspendMicrovm",
-        "lambda:ResumeMicrovm",
-        "lambda:TerminateMicrovm",
-        "lambda:CreateMicrovmAuthToken",
-        "lambda:CreateMicrovmShellAuthToken",
-        "lambda:PassNetworkConnector",
-        "lambda:TagResource",
-        "lambda:ListTags"
+        "lambda:ListManagedMicrovmImages", "lambda:ListManagedMicrovmImageVersions",
+        "lambda:CreateMicrovmImage", "lambda:GetMicrovmImage", "lambda:GetMicrovmImageVersion",
+        "lambda:ListMicrovmImageVersions", "lambda:ListMicrovmImageBuilds", "lambda:GetMicrovmImageBuild",
+        "lambda:DeleteMicrovmImage", "lambda:DeleteMicrovmImageVersion",
+        "lambda:RunMicrovm", "lambda:GetMicrovm", "lambda:ListMicrovms",
+        "lambda:SuspendMicrovm", "lambda:ResumeMicrovm", "lambda:TerminateMicrovm",
+        "lambda:CreateMicrovmAuthToken", "lambda:PassNetworkConnector",
+        "lambda:TagResource", "lambda:ListTags"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "BuildRole",
+      "Sid": "Roles",
       "Effect": "Allow",
       "Action": ["iam:CreateRole", "iam:GetRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:DeleteRole", "iam:TagRole", "iam:PassRole"],
       "Resource": ["arn:aws:iam::*:role/aws-deepcuts-microvm-build-role", "arn:aws:iam::*:role/aws-deepcuts-microvm-exec-role"]
@@ -95,7 +93,7 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
     {
       "Sid": "ArtifactBucket",
       "Effect": "Allow",
-      "Action": ["s3:CreateBucket", "s3:PutPublicAccessBlock", "s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject", "s3:DeleteBucket"],
+      "Action": ["s3:CreateBucket", "s3:PutPublicAccessBlock", "s3:PutBucketVersioning", "s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:ListBucketVersions", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:DeleteBucket"],
       "Resource": ["arn:aws:s3:::aws-deepcuts-microvms-*", "arn:aws:s3:::aws-deepcuts-microvms-*/*"]
     },
     {
@@ -103,6 +101,12 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
       "Effect": "Allow",
       "Action": ["logs:CreateLogGroup", "logs:DescribeLogGroups", "logs:PutRetentionPolicy", "logs:TagResource", "logs:DeleteLogGroup", "logs:FilterLogEvents", "logs:GetLogEvents", "logs:DescribeLogStreams"],
       "Resource": "*"
+    },
+    {
+      "Sid": "Bedrock",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": ["arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-lite-v1:0", "arn:aws:bedrock:ap-northeast-3::foundation-model/amazon.nova-2-lite-v1:0", "arn:aws:bedrock:ap-northeast-1:*:inference-profile/jp.amazon.nova-2-lite-v1:0"]
     },
     {
       "Sid": "Identity",
@@ -114,32 +118,12 @@ AWS Deep Cutsは、AWS の最新のサービスやニッチな機能、または
 }
 ```
 
-`lambda:TagResource` を忘れると `create-microvm-image --tags` が、`lambda:PassNetworkConnector` を忘れると `run-microvm` が、それぞれメッセージ無しの `AccessDeniedException` になります（原因は CloudTrail に出ます）。
+`lambda:TagResource` が無いと `create-microvm-image --tags` が、`lambda:PassNetworkConnector` が無いと `run-microvm` が、それぞれメッセージ無しの `AccessDeniedException` になります（原因は CloudTrail に出ます）。
 </details>
-
-## 構築するアーキテクチャ
-
-```mermaid
-graph LR
-    subgraph Build["イメージのビルド（setup.sh）"]
-        S3["S3<br/>app.zip<br/>(Dockerfile + server.py)"] --> IMG["MicroVM イメージ<br/>= 起動済みの<br/>メモリ + ディスクのスナップショット"]
-    end
-    subgraph VM["microVM（run.sh / idle.sh / twins.sh）"]
-        CT["コンテナ<br/>python3 server.py<br/>:8080 アプリ API<br/>:9000 フック"]
-    end
-    IMG -- "run-microvm<br/>（スナップショットから復元）" --> VM
-    CS["CloudShell<br/>（aws CLI + curl）"] -- "lambda-microvms API<br/>suspend / resume / terminate" --> VM
-    CS -- "HTTPS + X-aws-proxy-auth<br/>（microVM 専用エンドポイント）" --> CT
-    HOOK["Lambda MicroVMs<br/>プラットフォーム"] -- "/run /suspend /resume /terminate<br/>（ライフサイクルフック）" --> CT
-```
-
-- `hands-on/app/server.py` は、Python 標準ライブラリだけで書いた 2 ポートの HTTP サーバーです。8080 番で「Python コードを実行して変数を保持する」API、9000 番で Lambda MicroVMs からのライフサイクルフックを受けます。
-- `hands-on/app/Dockerfile` は `public.ecr.aws/lambda/microvms:al2023-minimal` に `python3` を入れるだけです。
-- ライフサイクルフックは、プラットフォームが `http://<microVM 内>:9000/aws/lambda-microvms/runtime/v1/<フック名>` に HTTP で呼びに来ます（`ready` / `validate` はビルド時、`run` / `suspend` / `resume` / `terminate` は実行時）。`server.py` は届いたフックをすべて記録して 200 を返します。
 
 以降、各種コマンドは[CloudShell](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html)（東京リージョン）で実行してください。
 
-## １．事前準備（イメージのビルド）
+## １．事前準備（イメージを「冷凍」する）
 
 ```bash
 # このリポジトリをクローン
@@ -153,120 +137,97 @@ bash ./setup.sh
 # ✅ セットアップが完了しました！
 ```
 
-setup.sh は以下を行います。
-
-1. AWS CLI が `lambda-microvms` に対応しているか、認証情報が有効かを確認
-2. Lambda 管理のベースイメージ（`al2023-1`）を `list-managed-microvm-images` で発見
-3. S3 バケットを作り、`Dockerfile` と `server.py` を zip にしてアップロード
-4. ビルド用 IAM ロール（Lambda サービスがビルド時に引き受け、S3 の成果物を読み、ビルドログを書く）と、実行用 IAM ロール（microVM が実行時に引き受け、アプリのログを CloudWatch Logs に書く）を作成
-5. CloudWatch Logs ロググループ `/aws/lambda-microvms/aws-deepcuts` を作成（保持 7 日）
-6. `create-microvm-image` でイメージを作成し、`CREATED` になるまで待機
-7. リソース ID を `resource-ids.env` に保存
+setup.sh は、S3 バケットに `Dockerfile` と `server.py` を zip でアップロードし、ビルド用・実行用の IAM ロールとロググループを作り、`create-microvm-image` でイメージを作って完了を待ちます。
 
 > **この手順で確かめること**
 > - **やること**: ビルド完了後に表示される「このバージョンのビルド（スナップショット）」の表を見ます。
-> - **期待する結果**: `memorySnapshotBytes`（メモリスナップショット）、`diskSnapshotBytes`、`codeInstallBytes` に値が入っています。ビルドは対象チップセット世代（Graviton の世代）ごとに作られるため、表が複数出ます。
-> - **ここから分かること**: イメージのビルドは「Dockerfile を実行してコンテナを作る」だけではなく、**アプリを起動し、`/ready` フックが 200 を返したところでメモリとディスクを凍結する** 処理です。`run-microvm` は、この凍結した状態を復元します。
+> - **期待する結果**: `memorySnapshotBytes`（メモリスナップショット）に数百 MB 規模の値が入っています。
+> - **ここから分かること**: イメージのビルドは、Dockerfile を実行してコンテナを作るだけでなく、**アプリを起動し、初期化が終わった合図（`/ready` フック）を待ってから、メモリとディスクを丸ごと凍結** しています。作りたての料理を急速冷凍するようなものです。起動（`run-microvm`）はその解凍なので、Python の起動やモジュールの読み込みは繰り返されません。
 
-ビルドの進み具合やエラーは CloudWatch Logs のロググループ `/aws/lambda-microvms/aws-deepcuts` で確認できます（ロググループを指定しない場合の既定は `/aws/lambda-microvms/<イメージ名>` です）。
-
-## ２．サスペンド／レジューム
+## ２．サンドボックスと会話する
 
 ```bash
-bash ./run.sh
-
-# 以下の文言が表示されれば成功です
-# ✅ サスペンド／レジュームの確認が完了しました！
+python3 sandbox.py
 ```
 
-run.sh は、microVM を 1 台起動し（最長 15 分で自動終了する設定）、変数を定義してからサスペンド → レジュームし、最後に終了します。計測結果は `output/results.md` に追記されます。
+microVM が 1 台起動し（最長 60 分で自動終了、5 分放置で自動サスペンド）、`>>>` プロンプトが出ます。まずは普通に Python を書いてみてください。
 
----
-
-#### 観点 1: スナップショットからの起動
-
-> **この観点で確かめること**
-> - **やること**: `run-microvm` を呼んでから、エンドポイントの `/ping` が 200 を返すまでの時間を計測します。
-> - **期待する結果**: 数秒以内に応答します。`〔実測値: 未測定〕`
-> - **ここから分かること**: アプリの初期化（Python の起動やモジュールの読み込み）はビルド時に済んでいて、起動時には繰り返されません。`server.py` の `boot_id` はプロセス起動時に生成される値ですが、これもビルド時の値がそのまま使われます。
-
----
-
-#### 観点 2: ライフサイクルフックとペイロード
-
-> **この観点で確かめること**
-> - **やること**: `/state` に表示される「フック履歴」を見ます。run.sh は `--run-hook-payload` に JSON を渡して起動しています。
-> - **期待する結果**: 起動直後に `run` フックが呼ばれていて、その body に渡したペイロードが入っています。
-> - **ここから分かること**: フックは、プラットフォームが **microVM の中のアプリに HTTP で通知してくる** 仕組みです。`run` フックが 200 を返すまで外部からのトラフィックは転送されないので、「共有イメージには入れたくない、起動ごとの秘密情報（セッション ID やトークン）」を安全に渡す経路として使えます。
-
----
-
-#### 観点 3: 認証トークンのポートスコープと、egress
-
-> **この観点で確かめること**
-> - **やること**: 8080 番だけを許可した認証トークンで、フック用の 9000 番にアクセスします。続けて、egress コネクタを付けずに起動した microVM の中から `https://checkip.amazonaws.com` に接続します。
-> - **期待する結果**: 9000 番へのアクセスは HTTP 403 で止まります。インターネットには **既定で出られます**（公式ドキュメントの記述どおりか、結果を記録してください）。`〔実測値: 未測定〕`
-> - **ここから分かること**: エンドポイントへのアクセスは、`X-aws-proxy-auth` ヘッダーのトークン（microVM・ポート・有効期限が埋め込まれた暗号化トークン）でプロキシが認可し、`X-aws-proxy-port` で転送先ポートを選びます（ヘッダーが無ければ既定の 8080 番）。トークンに無いポートはアプリに届く前に止まります。一方、egress は既定でパブリックなインターネットに出られるので、**「信用できないコードを動かす」なら、VPC の egress コネクタで出口を絞る設計が要ります**。
-
----
-
-#### 観点 4: サスペンドしても状態が残る
-
-> **この観点で確かめること**
-> - **やること**: `/exec` で `secret = 42` を定義してから `suspend-microvm` を呼び、`SUSPENDED` を確認して 10 秒待ち、`resume-microvm` で起こします。
-> - **期待する結果**: レジューム後の `/state` に `secret = 42` が残っていて、`boot_id` も変わりません。フック履歴に `suspend` と `resume` が追加されています。レジュームにかかる時間 `〔実測値: 未測定〕`
-> - **ここから分かること**: サスペンドは「プロセスを止めて後で作り直す」のではなく、**メモリとディスクをそのまま凍結して、後で同じところから続ける** 操作です。サスペンド中はコンピュート料金が止まり、スナップショットの保存料金だけがかかります。
-
----
-
-#### 観点 5: 眠っている間の時計
-
-> **この観点で確かめること**
-> - **やること**: サスペンド前後で、microVM の中の `time.time()`（壁時計）と `time.monotonic()`（単調時計）の差を比べます。
-> - **期待する結果**: 結果を記録してください。`〔実測値: 未測定〕`
-> - **ここから分かること**: 凍結したメモリを復元すると、ゲスト OS の時計は「眠る前」のままです。それをどう補正するかはプラットフォームの設計で決まります。壁時計だけが進んでいれば「単調時計は眠っていた」、両方進んでいれば「眠っていた時間も含めて進めた」ことになり、タイムアウトやトークンの有効期限を扱うアプリの設計に直接関わります。
-
----
-
-## ３．アイドルポリシー（自動サスペンド／自動レジューム）
-
-```bash
-bash ./idle.sh
-
-# 以下の文言が表示されれば成功です
-# ✅ アイドルポリシーの確認が完了しました！
+```text
+>>> secret = 42
+>>> print(secret * 2)
+84
+>>> import os, platform; print(platform.machine(), os.getpid())
+aarch64 ...
+>>> :vars
 ```
 
 > **この観点で確かめること**
-> - **やること**: `maxIdleDurationSeconds=60`、`autoResumeEnabled=true` で起動し、何もせずに状態を 10 秒ごとに表示します。`SUSPENDED` になったら、エンドポイントにリクエストを送ります。
-> - **期待する結果**: 最後のリクエストから 60 秒ほどで `SUSPENDED` になり、リクエストを送ると自動で起きて変数も残っています。自動レジュームにかかる時間 `〔実測値: 未測定〕`
-> - **ここから分かること**: 「アイドル」の判定は **エンドポイントへのトラフィック** で行われます（`get-microvm` での状態確認はエンドポイントを通らないので、アイドルのままです）。`suspendedDurationSeconds` を過ぎると自動終了するので、「使われなくなったサンドボックスが勝手に片付く」設計ができます。
+> - **やること**: 変数を定義し、別の行から参照します。`:vars` で変数一覧とフック履歴を見ます。
+> - **期待する結果**: 変数は残っています。CPU は `aarch64`（Graviton）です。フック履歴に `run` が記録され、その body に `sandbox.py` が渡したペイロードが入っています。
+> - **ここから分かること**: microVM の中では **1 つの Python プロセスが生き続けて** います。Lambda 関数のように呼び出しごとに環境が入れ替わることはありません。`run` フックは「起動した直後に、プラットフォームがアプリに HTTP で知らせてくる」仕組みで、この 1 台だけの秘密情報を渡す経路に使えます。
 
-## ４．（発展）双子の microVM と乱数
+## ３．AI にコードを書かせて、VM の中で動かす
+
+```text
+>>> :ai 1 から 100 までの素数を表示して
+```
+
+Bedrock が書いたコードが表示されるので、内容を見て `y` を押すと microVM の中で実行されます。いくつか試してみてください。
+
+```text
+>>> :ai さっき定義した secret という変数を使って、その数の階乗を計算して
+>>> :ai /app 以下のファイルを全部削除して
+>>> :ai 100MB のメモリを確保して、確保できた量を表示して
+```
+
+> **この観点で確かめること**
+> - **やること**: 役に立つお願いと、危ないお願い（ファイルの削除など）を両方試します。
+> - **期待する結果**: どれも microVM の中で実行され、結果が返ります。`/app` を消しても、あなたの CloudShell には何も起きません（`sandbox.py` も `server.py` のコピーもそのまま残っています）。
+> - **ここから分かること**: **AI の書いたコードを実行しているのは、あなたの環境ではなく、使い捨ての VM** です。コードを実行前に見せて `y` を押させる設計は、「AI が書いたものを人間が承認してから動かす」という、生成 AI 時代の基本的な安全策です。
+
+## ４．眠らせても覚えている
+
+```text
+>>> counter = 1
+>>> :sleep
+>>> :wake
+>>> print(counter)
+```
+
+> **この観点で確かめること**
+> - **やること**: 変数を定義してから `:sleep` でサスペンドし、`:wake` で起こします。表示される「変数」「boot_id」「時計」を見ます。
+> - **期待する結果**: 変数は残り、`boot_id`（プロセス起動時に生成した値）も変わりません。フック履歴に `suspend` と `resume` が追加されています。レジュームにかかる時間は数秒です。
+> - **ここから分かること**: サスペンドは「止めて作り直す」のではなく、**メモリとディスクを凍結して、同じところから続ける** 操作です。眠っている間はコンピュート料金がかからず、スナップショットの保存料金だけになります。「時計」の表示で、眠っていた時間が壁時計・単調時計にどう反映されたかも分かります。
+
+5 分以上放置してから何か実行すると、`💤 microVM は眠っていました。リクエストを送って起こします…` と表示されます。これが **アイドルポリシー** です。「エンドポイントにリクエストが来ない時間」が閾値を超えると自動でサスペンドされ、リクエストが来ると自動で起きます。
+
+## ５．壊しても捨てればいい
+
+```text
+>>> :break
+>>> :new
+>>> print(secret)
+```
+
+> **この観点で確かめること**
+> - **やること**: `:break` でサンドボックスのプロセスを殺し、`:status` で状態を見てから、`:new` で新しい microVM に取り替えます。
+> - **期待する結果**: `:break` の後は `/ping` が応答しなくなります。`:new` は数秒で新しい 1 台を用意します。新しい microVM では `secret` は未定義です（別の個体なので）。
+> - **ここから分かること**: 壊れた環境を直す必要はありません。**イメージ（冷凍したもの）から解凍し直せば、数秒で初期状態に戻ります**。AI エージェントのセッションごとに 1 台与えて、終わったら捨てる、という使い方が自然にできます。
+
+終わるときは `:quit` です。microVM を終了するか聞かれます。
+
+## ６．（発展）同じ冷凍食品は同じ味 — 双子の microVM と乱数
 
 ```bash
 bash ./twins.sh
 ```
 
 > **この観点で確かめること**
-> - **やること**: 同じイメージから microVM を 2 台起動し、それぞれの `/random` を 1 回ずつ取得します。`/random` は Python の `random.random()`（プロセス起動時に seed される擬似乱数）、`os.urandom()`（カーネルの乱数）、`uuid4()` を返します。
-> - **期待する結果**: 結果を記録してください。`〔実測値: 未測定〕`
-> - **ここから分かること**: 2 台は **同じメモリスナップショットから復元** されています。プロセス起動時に seed された擬似乱数の状態も複製されるので、同じ値が出ても不思議ではありません。これは Lambda SnapStart でも知られる「スナップショットの一意性」の問題で、乱数・セッション ID・暗号鍵の生成はスナップショットの後（`run` フック以降）に行う必要があります。
+> - **やること**: 同じイメージから microVM を 2 台起動し、それぞれの `/random`（`random.random()`、`os.urandom()`、`uuid4()`）を 1 回ずつ取得して比べます。
+> - **期待する結果**: 結果を記録してください。`random.random()` は、プロセス起動時（= イメージのビルド時）に seed されているため、同じ値が出る可能性があります。
+> - **ここから分かること**: 2 台は **同じメモリスナップショットから復元** されています。乱数の状態、セッション ID、秘密情報などをビルド時に作ると、全 microVM で共有されてしまいます。公式のベストプラクティスも「一意な値や秘密は起動後（`run` フック以降）に作り、乱数は CSPRNG を使う」と案内しています。
 
-## ５．（発展）シェルで中に入る
-
-```bash
-bash ./shell.sh
-```
-
-shell.sh は `SHELL_INGRESS` コネクタ付きで microVM を起動し（最長 30 分で自動終了）、接続方法を表示します。マネジメントコンソールの「Connect」から接続するのが簡単です。
-
-> **この観点で確かめること**
-> - **やること**: シェルに入って `ps -ef`、`cat /etc/os-release`、`uname -r`、`cat /proc/sys/kernel/random/boot_id` を実行します。
-> - **期待する結果**: `python3 /app/server.py` が見え、OS は Amazon Linux 2023 です。
-> - **ここから分かること**: シェルは **アプリと同じコンテナの中** に入ります（同じプロセスツリー、同じファイルシステム）。Firecracker の microVM の中で containerd がコンテナを動かし、その中で `server.py` が動く、という 3 層構造です。
-
-## ６．後片付け
+## ７．後片付け
 
 検証が終わったら、無駄な課金を防ぐためにリソースを削除しましょう。
 
@@ -283,28 +244,21 @@ cd ../..
 sudo rm -rf aws-lambda-microvms
 ```
 
-cleanup.sh は、イメージから起動した microVM をすべて終了 → イメージを削除 → ロググループ → ビルド用ロール → S3 バケットの順に削除します。
-
 ## トラブルシューティング
 
 | 表示されるエラー | 主な原因 | 対処 |
 | -- | -- | -- |
-| `aws: error: argument command: Invalid choice` / `lambda-microvms コマンドに対応していません` | AWS CLI が古い | AWS CLI v2 を最新版に更新する。CloudShell なら新しいセッションを開く |
-| `AccessDeniedException`（メッセージ無し） | Lambda MicroVMs 未提供のリージョン、または `lambda:TagResource` などの権限不足 | リージョンを `ap-northeast-1` にする。CloudTrail で拒否されたアクションを確認する |
-| イメージが `CREATE_FAILED` | Dockerfile の失敗（`CONTAINER_BUILD_FAILED`。`dnf install` の失敗など）、zip のルートに Dockerfile が無い（`ARCHIVE_DOCKERFILE_NOT_FOUND`）、`/ready` フックが 200 を返さない、`--hooks` の `port` とアプリの待ち受けポートの不一致 | CloudWatch Logs の `/aws/lambda-microvms/aws-deepcuts` と、`list-microvm-image-builds` の `stateReason` を見る |
+| `lambda-microvms コマンドに対応していません` | AWS CLI が古い | AWS CLI v2 を最新版に更新する。CloudShell なら新しいセッションを開く |
+| `AccessDeniedException`（メッセージ無し） | Lambda MicroVMs 未提供のリージョン、または `lambda:TagResource` / `lambda:PassNetworkConnector` などの権限不足 | リージョンを `ap-northeast-1` にする。CloudTrail で拒否されたアクションを確認する |
+| イメージが `CREATE_FAILED` | Dockerfile の失敗（`CONTAINER_BUILD_FAILED`）、zip のルートに Dockerfile が無い（`ARCHIVE_DOCKERFILE_NOT_FOUND`）、`/ready` フックが 200 を返さない | CloudWatch Logs の `/aws/lambda-microvms/aws-deepcuts` と、`list-microvm-image-builds` の `stateReason` を見る |
 | `A MicroVM image with the name ... already exists` | 前回のイメージが残っている | `cleanup.sh` を実行してから `setup.sh` をやり直す |
-| エンドポイントが `403 Access to port denied` | トークンの `allowedPorts` に無いポートへアクセスした | トークン発行時のポートと `X-aws-proxy-port` を合わせる |
-| エンドポイントが `502` | 指定ポートで待ち受けているプロセスが無い | `X-aws-proxy-port` を 8080 にする。シェルで `ps -ef` を確認する |
-| `ValidationException` （shell token） | `SHELL_INGRESS` 無しで起動した microVM にシェルトークンを発行した | `shell.sh` で起動した microVM を使う |
-| `InsufficientCapacityException` | 一時的な容量不足 | 少し待って再実行する |
-| `ServiceQuotaExceededException`（HTTP 402） | 同時 microVM 数などのクォータ超過 | 不要な microVM を終了する。Service Quotas で上限を確認する |
+| `:ai` で `Bedrock を呼べませんでした` | Bedrock の権限不足、モデル ID がリージョンで使えない | `bedrock:InvokeModel` を付与する。`aws bedrock list-foundation-models --region ap-northeast-1 --by-provider Amazon` で使えるモデルを確認し、環境変数 `DEEPCUTS_MODEL` で指定する（例: `jp.amazon.nova-2-lite-v1:0`） |
+| エンドポイントが `502` | サンドボックスのプロセスが死んでいる（`:break` の後など）、起動直後の数秒 | `:new` で取り替える。少し待つ |
+| `ServiceQuotaExceededException`（HTTP 402） | 同時に動かせる microVM のメモリ合計のクォータ超過 | 不要な microVM を終了する（`cleanup.sh` がまとめて終了します） |
 
 ## 参考リンク
 
-- [AWS Lambda MicroVMs（開発者ガイド）](https://docs.aws.amazon.com/lambda/latest/dg/lambda-microvms-guide.html)
-- [Create your first Lambda MicroVM](https://docs.aws.amazon.com/lambda/latest/dg/microvms-getting-started.html)
-- [MicroVM images](https://docs.aws.amazon.com/lambda/latest/dg/microvms-images.html) / [Running and using MicroVMs](https://docs.aws.amazon.com/lambda/latest/dg/microvms-launching.html) / [Networking](https://docs.aws.amazon.com/lambda/latest/dg/microvms-networking.html) / [Security and permissions](https://docs.aws.amazon.com/lambda/latest/dg/microvms-security.html) / [Troubleshooting](https://docs.aws.amazon.com/lambda/latest/dg/microvms-troubleshooting.html)
-- [Lambda MicroVMs API Reference](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html)
-- [AWS CLI `lambda-microvms` リファレンス](https://docs.aws.amazon.com/cli/latest/reference/lambda-microvms/)
+- [AWS Lambda MicroVMs（開発者ガイド）](https://docs.aws.amazon.com/lambda/latest/dg/lambda-microvms-guide.html) / [Create your first Lambda MicroVM](https://docs.aws.amazon.com/lambda/latest/dg/microvms-getting-started.html) / [MicroVM images](https://docs.aws.amazon.com/lambda/latest/dg/microvms-images.html) / [Running and using MicroVMs](https://docs.aws.amazon.com/lambda/latest/dg/microvms-launching.html) / [Best practices](https://docs.aws.amazon.com/lambda/latest/dg/microvms-best-practices.html)
+- [Lambda MicroVMs API Reference](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html) / [AWS CLI `lambda-microvms`](https://docs.aws.amazon.com/cli/latest/reference/lambda-microvms/)
 - [Run isolated sandboxes with full lifecycle control: AWS Lambda introduces MicroVMs（AWS News Blog）](https://aws.amazon.com/blogs/aws/run-isolated-sandboxes-with-full-lifecycle-control-aws-lambda-introduces-microvms/)
-- [awslabs/agent-plugins — aws-lambda-microvms skill](https://github.com/awslabs/agent-plugins/blob/main/plugins/aws-serverless/skills/aws-lambda-microvms/SKILL.md)
+- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)

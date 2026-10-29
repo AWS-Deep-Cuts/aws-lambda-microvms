@@ -81,7 +81,7 @@ if [[ -n "${BUCKET_NAME:-}" ]]; then
   echo "  完了: ${BUCKET_NAME}"
 fi
 rm -rf "${SCRIPT_DIR}/output"
-rm -f "${RESOURCE_FILE}" "${SCRIPT_DIR}/app.zip"
+rm -f "${RESOURCE_FILE}" "${SCRIPT_DIR}/app.zip" "${SCRIPT_DIR}/.sandbox-state.json"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ すべてのリソースの削除が完了しました！"

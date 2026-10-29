@@ -1,5 +1,6 @@
 resource-ids.env
 app.zip
 hands-on/output/
+hands-on/.sandbox-state.json
 __pycache__/
 *.pyc
