@@ -1,5 +1,5 @@
 ---
-title: 【AWS Deep Cutsシリーズ】AWS Lambda MicroVMsって知ってる？AIが生成したコードを、セッションごとに専用のVMで安全に実行しよう！
+title: 【AWS Deep Cutsシリーズ】AWS Lambda MicroVMsって知ってる？AIが生成したコードをセッションごとに専用のVMで安全に実行しよう！
 tags: AWS AWSDeepCuts lambda LambdaMicroVMs Firecracker
 author: kenken38
 slide: false
@@ -63,7 +63,7 @@ AWS Lambda MicroVMs は、Firecracker の microVM を、開発者が API で起�
 
 開発者は、MicroVM の起動・サスペンド・終了のような操作を、Lambda MicroVMs の API を呼び出すプログラムで行います。この記事では、このプログラムを**管理用のアプリ**と呼び、MicroVM の中で動くアプリと区別します。以降、単に「アプリ」と書くときは、MicroVM の中で動くアプリを指します。
 
-全体像は次の図のとおりです。図の一番上の「管理用のアプリ」が、Lambda MicroVMs の API を呼び出すプログラムを表します。図の `RUNNING` と `SUSPENDED` は、MicroVM の状態の名前です。状態ごとの料金は、仕組みの章で説明します。
+全体像は次の図のとおりです。図の一番上の「管理用のアプリ」が、Lambda MicroVMs の API を呼び出すプログラムを表します。図の `RUNNING` と `SUSPENDED` は、MicroVM の状態の名前です。図の vCPU（virtual CPU）は、VM に割り当てる仮想的な CPU です。状態ごとの料金は、仕組みの章で詳しく説明します。
 
 ![1 つの MicroVM イメージから、セッションごとに MicroVM を起動する](https://github.com/AWS-Deep-Cuts/aws-lambda-microvms/raw/main/img/overview.png)
 
@@ -78,7 +78,7 @@ AWS Lambda MicroVMs には、以下のような特徴があります。
 - **一般的なサーバーのプログラムを動かせる**
   MicroVM の中では、ポートで HTTP や WebSocket のリクエストを待ち受ける、一般的なサーバーのプログラムが動きます。Lambda 関数のように、処理をハンドラー関数の形に書き換える必要はありません。
 - **料金は稼働時間とスナップショットとデータ転送で決まる**
-  MicroVM が稼働している間は、vCPU（virtual CPU）とメモリの料金がかかります。vCPU は、VM に割り当てる仮想的な CPU です。このほかに、スナップショットの保存料金・書き込み料金・読み取り料金と、データ転送の料金がかかります。サスペンド中は、vCPU とメモリの料金がかかりません。
+  MicroVM が稼働している間は、vCPU とメモリの料金がかかります。このほかに、スナップショットの保存料金・書き込み料金・読み取り料金と、データ転送の料金がかかります。サスペンド中は、vCPU とメモリの料金がかかりません。
 - **東京リージョンで使える**
   一般提供が始まった 2026 年 6 月から、東京リージョンで使えます。AWS の発表によると、2026 年 10 月 22 日の時点で、14 のリージョンで提供されています。この 14 のリージョンに、大阪リージョンは含まれていません。
 - **CPU のアーキテクチャは ARM64**
@@ -87,7 +87,7 @@ AWS Lambda MicroVMs には、以下のような特徴があります。
 # 仕組み
 この章では、前の章の全体像の図に沿って、MicroVM イメージを作成してから MicroVM を終了するまでの順に、仕組みを説明します。なお、この章では、Lambda MicroVMs のサービスが自動で行う処理を「Lambda が〜する」と書きます。この「Lambda」は、Lambda 関数を指すものではありません。
 
-この章の図は、ハンズオンと共通です。そのため、図では、操作する人を「あなた」と書いています。図の「あなた」は、開発者を指します。また、図の「AWS が自動で行う処理」の枠は、Lambda が自動で行う処理を表します。
+この章の図は、料金の図を除いて、ハンズオンと共通です。そのため、図では、操作する人を「あなた」と書いています。図の「あなた」は、開発者を指します。また、図の「AWS が自動で行う処理」の枠は、Lambda が自動で行う処理と、それを受けて MicroVM の中のアプリが行う処理を表します。
 
 | 節 | 開発者が呼び出す API | 説明すること |
 | --- | --- | --- |
@@ -143,7 +143,7 @@ Lambda のような AWS のサービスが、IAM ロールに付与された権�
 MicroVM イメージを作成・更新するたびに、新しい**バージョン**が作成されます。Lambda は、バージョンごとに、MicroVM の中のアプリを起動してスナップショットを保存する処理を行います。この記事では、この処理を**イメージのビルド**と呼びます。API の仕様では、イメージのビルドごとに記録が残ります。イメージのビルドは CPU の種類と世代ごとに分かれることがあるため、1 つのバージョンに、イメージのビルドとスナップショットが複数あることもあります。
 
 ## ライフサイクルフック
-Lambda は、イメージの作成中と、MicroVM の状態が変わるときに、アプリへ HTTP のリクエストを送ります。このリクエストを**ライフサイクルフック**と呼びます。この記事では、ライフサイクルフックを短く「フック」とも書きます。
+Lambda は、イメージのビルド中と、MicroVM の状態が変わるときに、アプリへ HTTP のリクエストを送ります。このリクエストを**ライフサイクルフック**と呼びます。この記事では、ライフサイクルフックを短く「フック」とも書きます。
 
 開発者は、`CreateMicrovmImage` を呼び出すときに、フックを受け付けるポートと、フックごとに有効にするかどうかを指定します。Lambda は、有効にしたフックだけを送ります。公式ドキュメントによると、ready フックと run フックは、イメージのビルドより前に有効にしておく必要があります。Lambda がイメージのビルドで保存するスナップショットに、その時点でのこれらのフックの設定が含まれるためです。また、MicroVM の状態が変わるときに送られるフックを使う場合も、ready フックを有効にしておく必要があります。開発者が後からフックの設定を変えるときは、`UpdateMicrovmImage` API でイメージを更新します。`UpdateMicrovmImage` を呼び出すと、Lambda は、新しいバージョンを作成して、イメージのビルドを行います。
 
@@ -151,11 +151,11 @@ Lambda は、それぞれのフックを、`/aws/lambda-microvms/runtime/v1/<フ
 
 | フック | Lambda がリクエストを送るタイミング | アプリで行う処理の例 |
 | --- | --- | --- |
-| ready | イメージの作成中、アプリの起動後 | 初期化が終わったら 200 を返す。200 を受けて、Lambda がスナップショットを保存する |
+| ready | イメージのビルド中、アプリの起動後 | 初期化が終わったら 200 を返す。200 を受けて、Lambda がスナップショットを保存する |
 | run | MicroVM の起動直後 | 利用者の ID や、秘密情報の保存場所の名前のような、MicroVM ごとの値を受け取る |
-| suspend | サスペンドの直前 | 外部との接続を閉じる |
-| resume | レジュームの直後 | 外部へ接続し直す |
-| terminate | 終了の直前 | 終了処理をする |
+| suspend | MicroVM をサスペンドする直前 | 外部との接続を閉じる |
+| resume | MicroVM をレジュームした直後 | 外部へ接続し直す |
+| terminate | 稼働中の MicroVM を終了する直前 | ログを書き出す。状態を MicroVM の外に保存する。外部のサービスへの MicroVM の登録を解除する |
 
 run フックのリクエストの本文は JSON で、MicroVM の ID と、`RunMicrovm` の `runHookPayload` パラメータで指定した文字列が入っています。`runHookPayload` は 4,096 バイトまでです。アプリが run フックに 200 を返すまで、エンドポイントへのリクエストはアプリに届きません。
 
@@ -168,7 +168,7 @@ run フックのリクエストの本文は JSON で、MicroVM の ID と、`Run
 
 発行された認証トークンでは、指定した MicroVM の、指定したポートにだけアクセスできます。エンドポイントにリクエストを送るプログラムは、管理用のアプリが取得した認証トークンを、`X-aws-proxy-auth` ヘッダーに付けて送ります。
 
-次の図は、ハンズオンでの例です。ハンズオンでは、開発者が、ブラウザから AWS CLI のコマンドを実行できる AWS CloudShell で、認証トークンの発行とリクエストの送信の両方を行います。図の 1 で `CreateMicrovmAuthToken` を呼び出すコマンドが、管理用のアプリの役割を担います。図の 2 の curl は、HTTP のリクエストを送るコマンドです。
+次の図は、ハンズオンでの例です。ハンズオンでは、開発者が、ブラウザから AWS CLI のコマンドを実行できる AWS CloudShell で、認証トークンの取得とリクエストの送信の両方を行います。図の 1 で `CreateMicrovmAuthToken` を呼び出すコマンドが、管理用のアプリの役割を担います。図の 2 の curl は、HTTP のリクエストを送るコマンドです。
 
 ![認証トークンの発行と、リクエストがアプリに届くまで](https://github.com/AWS-Deep-Cuts/aws-lambda-microvms/raw/main/img/request-flow.png)
 
@@ -179,14 +179,16 @@ MicroVM の状態と、状態を変える操作は、次の図のとおりです
 
 ![MicroVM の状態と、状態ごとの料金](https://github.com/AWS-Deep-Cuts/aws-lambda-microvms/raw/main/img/lifecycle.png)
 
-| 状態 | 意味 | かかる料金 |
+次の表は、それぞれの状態の意味と、その状態で主にかかる料金を示しています。
+
+| 状態 | 意味 | 主にかかる料金 |
 | --- | --- | --- |
 | `PENDING` | 起動の処理中 | スナップショットの読み取り料金 |
 | `RUNNING` | 稼働中で、リクエストを受け付ける | vCPU とメモリの料金 |
 | `SUSPENDING`・`SUSPENDED` | サスペンドの処理中・サスペンド中 | スナップショットの書き込み料金と保存料金 |
-| `TERMINATING`・`TERMINATED` | 終了の処理中・終了済み | かからない |
+| `TERMINATING`・`TERMINATED` | 終了の処理中・終了済み | 終了済みになった後はかからない |
 
-レジュームの処理中を表す状態は無く、MicroVM の状態は、レジュームが終わるまで `SUSPENDED` のままです。スナップショットの読み取り料金は、起動のときだけでなく、レジュームのときにもかかります。
+MicroVM の状態には、レジュームの処理中を表すものがありません。公式ドキュメントによると、Lambda が resume フックを送ってから、アプリが 200 を返すまでの間、MicroVM の状態は `SUSPENDED` のままです。MicroVM の状態は、アプリが 200 を返した後に `RUNNING` になります。ただし、第三者が 2026 年 8 月から 9 月に米国東部のバージニア北部リージョンで行った検証では、リクエストが届いて MicroVM が自動でレジュームしたときに、MicroVM の状態を返す `GetMicrovm` API が、`PENDING` を返してから `RUNNING` を返したと報告されています。スナップショットの読み取り料金は、起動のときだけでなく、レジュームのときにもかかります。
 
 MicroVM をサスペンドすると、Lambda はメモリとディスクの内容を保存して、MicroVM を一時停止します。MicroVM をレジュームすると、Lambda は、保存した状態から MicroVM を再開します。Agent Skill によると、レジュームにかかる時間は、Lambda が読み取るスナップショットの量に比例し、500 MB あたり約 1 秒が目安です。レジュームした MicroVM には、変数の値、動いていたプロセス、ファイルがすべて残っています。ただし、MicroVM から外部へのネットワーク接続は、レジュームのときに切断されます。そのため、開発者は、resume フックを受け取ったときに外部へ接続し直す処理を、MicroVM の中のアプリに実装しておきます。
 
@@ -222,18 +224,20 @@ Lambda MicroVMs の Agent Skill によると、MicroVM がスナップショッ�
 公式のベストプラクティスでは、セッション ID や秘密情報のように MicroVM ごとに異なるべき値を、MicroVM の起動後に作成するよう案内しています。Agent Skill は、具体的な方法として、run フックで値を受け取る方法と、起動後に暗号論的に安全な乱数生成器で値を作成する方法を挙げています。暗号論的に安全な乱数生成器とは、生成した値から次の値を推測できないように設計された乱数生成器です。Python の場合、Agent Skill は `secrets` モジュールを使うよう案内しています。`secrets` モジュールは、カーネルの乱数生成器から値を取得するため、MicroVM ごとに異なる値を返します。
 
 ## 料金
-Lambda MicroVMs の料金は、次の 4 つの要素で決まります。単価は、2026 年 10 月 28 日時点の AWS Price List の、東京リージョンの値です。
+Lambda MicroVMs の料金は、次の 4 つの要素で決まります。単価は、AWS の価格表である AWS Price List の、2026 年 10 月 28 日時点の東京リージョンの値です。
 
 | 料金の要素 | かかるとき | 東京リージョンの単価 |
 | --- | --- | --- |
-| ① 稼働中の vCPU とメモリ | 状態が `RUNNING` の間、秒単位でかかる | vCPU 秒あたり $0.0000322421、GB 秒あたり $0.0000042688 |
-| ② スナップショットの保存 | MicroVM イメージのバージョンを削除するまでと、MicroVM がサスペンドしている間 | GB 時間あたり $0.0001333333 |
-| ③ スナップショットの読み書き | 読み取りは MicroVM の起動とレジュームのとき、書き込みはサスペンドのとき | 読み取り GB あたり $0.0018548941、書き込み GB あたり $0.0046556039 |
-| ④ データ転送 | MicroVM と外部が通信するとき | AWS の標準のデータ転送料金 |
+| ① vCPU とメモリの料金 | 状態が `RUNNING` の間、秒単位でかかる | vCPU 秒あたり $0.0000322421、GB 秒あたり $0.0000042688 |
+| ② スナップショットの保存料金 | MicroVM イメージのバージョンを削除するまでと、MicroVM がサスペンドしている間 | GB 時間あたり $0.0001333333 |
+| ③ スナップショットの読み取り料金と書き込み料金 | 読み取りは MicroVM の起動とレジュームのとき、書き込みはサスペンドのとき | 読み取り GB あたり $0.0018548941、書き込み GB あたり $0.0046556039 |
+| ④ データ転送の料金 | MicroVM と外部が通信するとき | AWS の標準のデータ転送料金 |
+
+4 つの要素と、① の vCPU とメモリの料金の計算例は、次の図のとおりです。計算例の 3 つの金額は、図のあとの 3 つの段落で順に説明します。
 
 ![Lambda MicroVMs の料金の要素と計算例](https://github.com/AWS-Deep-Cuts/aws-lambda-microvms/raw/main/img/billing.png)
 
-開発者は、MicroVM の大きさを、イメージの作成時にメモリの量で指定します。vCPU の数は、メモリ 2 GB あたり 1 vCPU の割合で決まります。MicroVM に常に割り当てられる vCPU とメモリの量を、**ベースライン**と呼びます。最も小さいベースラインは、0.25 vCPU と 0.5 GB のメモリです。このベースラインの MicroVM が、ベースラインの量だけを使って 1 時間稼働した場合、東京リージョンでの vCPU とメモリの料金は約 $0.037 です。
+開発者は、MicroVM の大きさを、イメージの作成時にメモリの量で指定します。vCPU の数は、メモリ 2 GB あたり 1 vCPU の割合で決まります。Lambda が MicroVM に常に割り当てる vCPU とメモリの量を、**ベースライン**と呼びます。最も小さいベースラインは、0.25 vCPU と 0.5 GB のメモリです。このベースラインの MicroVM が、ベースラインの量だけを使って 1 時間稼働した場合、東京リージョンでの vCPU とメモリの料金は約 $0.037 です。
 
 MicroVM は、負荷に応じて、ベースラインの 4 倍まで vCPU とメモリを使えます。この上限を**ピーク**と呼びます。ベースラインを超えた分には、実際に使った量に応じて、秒単位で追加の料金がかかります。最も小さいベースラインの MicroVM が、1 時間続けてピークの 1 vCPU と 2 GB のメモリを使った場合、1 時間あたりの vCPU とメモリの料金は、最大で約 $0.147 です。AWS Price List には、ベースラインを超えた分の単価が、別の項目として載っていません。そのため、この金額は、ベースラインを超えた分にも、ベースラインと同じ単価がかかるものとして計算しています。
 
@@ -270,7 +274,9 @@ MicroVM は、負荷に応じて、ベースラインの 4 倍まで vCPU とメ
   隔離した環境で実行する場合でも、実行の前にコードを表示して人が確認すると、外部への意図しない通信や、大量の計算による料金の増加を防ぎやすくなります。
 
 # ハンズオンはこちら！
-ハンズオンでは、AWS CLI のコマンドを 1 つずつ実行し、MicroVM イメージの作成から、MicroVM の起動、サスペンドとレジューム、同じイメージから起動した 2 台の比較までを確かめます。最後に、生成 AI のモデルを API で呼び出せる Amazon Bedrock を使って Python のコードを生成し、そのコードを MicroVM の中で実行します。
+ハンズオンでは、AWS CLI のコマンドを 1 つずつ実行し、MicroVM イメージの作成から、MicroVM の起動、サスペンドとレジューム、同じイメージから起動した 2 台の比較までを確かめます。最後に、生成 AI のモデルを API で呼び出せる Amazon Bedrock を使って、モデルに Python のコードを生成させ、そのコードを MicroVM の中で実行します。
+
+ハンズオンの構成は、次の図のとおりです。図の「手順 2」などの番号は、ハンズオンの手順の番号です。
 
 ![ハンズオンの構成図](https://github.com/AWS-Deep-Cuts/aws-lambda-microvms/raw/main/img/architecture.png)
 
@@ -289,6 +295,7 @@ AWS Lambda MicroVMs は、セッションごとに専用の VM を起動し、�
 1. [ベストプラクティス（Best practices）](https://docs.aws.amazon.com/lambda/latest/dg/microvms-best-practices.html)
 1. [ライフサイクルを完全に制御できる隔離されたサンドボックスを実行する：AWS Lambda が MicroVMs を発表（Run isolated sandboxes with full lifecycle control: AWS Lambda introduces MicroVMs）](https://aws.amazon.com/blogs/aws/run-isolated-sandboxes-with-full-lifecycle-control-aws-lambda-introduces-microvms/)
 1. [AWS Lambda の料金（AWS Lambda Pricing）](https://aws.amazon.com/lambda/pricing/)
+1. [AWS Price List の AWS Lambda の東京リージョンの価格（AWS Price List: AWSLambda, ap-northeast-1）](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSLambda/current/ap-northeast-1/index.json)
 1. [Lambda MicroVMs の Agent Skill（aws-lambda-microvms）](https://github.com/aws/agent-toolkit-for-aws/blob/main/skills/specialized-skills/serverless-skills/aws-lambda-microvms/SKILL.md)
 1. [Firecracker：サーバーレスアプリケーションのための軽量な仮想化（Firecracker: Lightweight Virtualization for Serverless Applications）](https://www.usenix.org/conference/nsdi20/presentation/agache)
 1. [Firecracker：複製した VM のエントロピー（Firecracker: Entropy for Clones）](https://github.com/firecracker-microvm/firecracker/blob/main/docs/snapshotting/random-for-clones.md)

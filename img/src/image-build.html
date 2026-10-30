@@ -15,7 +15,8 @@
      - hands-on/app/Dockerfile（dnf で python3 をインストールし、server.py をコピーし、CMD で server.py を起動する）と
        hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフックを受け、受け取ったフックをメモリに記録して 200 を返す）
      表記: フックの名前は記事・README と同じく「ready フック」と書き、パスの /aws/lambda-microvms/runtime/v1/ready と区別する。
-     4 の「Python をインストールし」は記事の Dockerfile の説明と同じ語 -->
+     4 の「Python をインストールし」は記事の Dockerfile の説明と同じ語。箱の題には読点を使わない（6 は「ready フックを送って 200 が返るのを待つ」）。
+     1・2 はあなた（記事では開発者）が行い、3〜7 は Lambda が行う。記事と README の図の説明と同じ分け方 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
@@ -55,7 +56,7 @@
   <div class="st" data-self="1" id="s3" style="left:287px;top:250px;width:226px"><i>3</i><b>ベースイメージから<br>MicroVM を起動する</b><span>イメージの作成用で、<br>OS は Amazon Linux 2023</span></div>
   <div class="st" data-self="1" id="s4" style="left:558px;top:250px;width:226px"><i>4</i><b>Dockerfile を実行する</b><span>Python をインストールし、<br>server.py をコピーする</span></div>
   <div class="st" data-self="1" id="s5" style="left:16px;top:448px;width:226px"><i>5</i><b>CMD で server.py を<br>起動する</b><span>ポート 8080 と 9000 で<br>リクエストを待ち受ける</span></div>
-  <div class="st" data-self="1" id="s6" style="left:287px;top:448px;width:226px"><i>6</i><b><code>ready</code> フックを送り、<br>200 が返るのを待つ</b><span>server.py はフックを<br>記録して 200 を返す</span></div>
+  <div class="st" data-self="1" id="s6" style="left:287px;top:448px;width:226px"><i>6</i><b><code>ready</code> フックを送って<br>200 が返るのを待つ</b><span>server.py はフックを<br>記録して 200 を返す</span></div>
   <div class="st hot" data-self="1" id="s7" style="left:558px;top:448px;width:226px"><i>7</i><b>メモリとディスクの<br>スナップショットを<br>保存する</b><span>実行中のプロセスも含む</span></div>
 
   <div class="done" id="done" style="left:16px;top:632px;width:768px;height:48px">

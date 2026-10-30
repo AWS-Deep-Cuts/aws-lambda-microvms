@@ -10,6 +10,9 @@
      - "By default, Lambda routes inbound traffic to port 8080 within your MicroVM." 別のポートは X-aws-proxy-port で指定し、
        allowedPorts に無いポートは 403（Lambda 開発者ガイド microvms-launching、factsheet 071, 083）
      - hands-on/app/server.py（ポート 8080 でアプリ、ポート 9000 でフック）。トークンが無いときのステータスコードは公開情報に無いため「拒否される」とだけ書く
+     - 認証トークンを発行するのは Lambda。あなた（記事では管理用のアプリの役割を担う CloudShell のコマンド）が CreateMicrovmAuthToken を呼び出すと、
+       Lambda が認証トークンを発行して応答で返す（記事「MicroVM の起動とアクセス」と README 手順 4-2 の説明）。そのため応答のカードの見出しを
+       「Lambda が発行した認証トークン」とする。認証トークンをヘッダーに付けて送るのは、リクエストを送る側（ハンズオンでは curl を実行するあなた）
      表記: 3 の検証と 4 への転送は、記事の「Lambda が〜する」（Lambda MicroVMs のサービスが自動で行う処理）と同じ書き方にする。
      4 の見出しは箱の幅に収めるため「server.py が処理する」とし、目的語の「リクエスト」は直前の矢印の説明に書く -->
 <link rel="stylesheet" href="diagram.css">
@@ -44,11 +47,12 @@
   <div class="lane" style="left:0;top:0;width:800px;height:357px"><span class="lt">あなたが行う操作</span></div>
   <div class="lane aws" style="left:0;top:385px;width:800px;height:352px"><span class="lt">AWS が自動で行う処理</span></div>
 
-  <!-- あなた: 認証トークンの発行。CloudShell・1・応答の中心の高さ（y=111）をそろえる -->
+  <!-- あなた: 認証トークンの発行を依頼する。CloudShell・1・応答の中心の高さ（y=111）をそろえる。
+       応答のカードは 1 と同じ高さ（y=36〜186）にし、見出しを 2 行にして「Lambda が発行した認証トークン」と書く -->
   <div class="node" id="cs" style="left:12px;top:83px"><img src="../icons/AWSCloudShell.svg"><div class="t">AWS CloudShell</div></div>
   <div class="st" data-self="1" id="s1" style="left:156px;top:36px;width:360px"><img src="../icons/AWSLambda.svg"><i>1</i><b>CreateMicrovmAuthToken を<br>呼び出す</b><span>MicroVM の ID、有効期限 60 分、<br>許可するポート 8080 を指定する</span></div>
-  <div class="card" id="tok" style="left:556px;top:49px;width:228px;height:124px">
-    <div class="h">応答 ・ 認証トークン</div>
+  <div class="card" id="tok" style="left:556px;top:36px;width:228px;height:150px">
+    <div class="h" style="line-height:1.3">Lambda が発行した<br>認証トークン</div>
 <pre>{"authToken": {
   "<b>X-aws-proxy-auth</b>":
     "<b>&lt;認証トークン&gt;</b>"}}</pre>
@@ -61,7 +65,7 @@
      -H "<b id="hdr">X-aws-proxy-auth: &lt;認証トークン&gt;</b>"</pre>
   </div>
   <div id="pTok" data-self="1" style="position:absolute;left:247.5px;top:242px;width:1px;height:1px"></div>
-  <div class="lbl ink" id="lTok" style="left:335px;top:196px">認証トークンをヘッダーに付ける</div>
+  <div class="lbl ink" id="lTok" style="left:335px;top:203px">認証トークンをヘッダーに付ける</div>
   <div class="lbl ink" style="left:412px;top:360px">HTTPS</div>
 
   <!-- AWS: Lambda が検証し、通ったリクエストだけをポート 8080 に転送する -->

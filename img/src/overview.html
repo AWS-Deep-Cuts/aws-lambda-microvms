@@ -14,7 +14,8 @@
      - API: RunMicrovm・SuspendMicrovm・TerminateMicrovm（service-2.json）
      表記: この図は記事だけで使うため、API を呼び出す側を記事の用語の「管理用のアプリ」で書く（記事の GLOSSARY: 開発者が作成し、Lambda MicroVMs の API を呼び出すプログラム）。
      状態の名前は、ほかの図の文中と同じ枠付きの等幅の札で書き、状態の意味（稼働中・サスペンド中）と料金の違いは説明の行で書く。
-     サスペンド中の B は、いまリクエストを送っていないため、利用者 B からの線を点線にする。
+     サスペンド中の B には、現在はリクエストが届いていないため、利用者 B からの線を点線にする。
+     点線の意味は、左下の凡例に「現在はリクエストが届いていない」と書く（図の点線と同じ線の見本を付ける）。
      A〜C の状態は説明用の例。線はすべて水平か垂直。差し色は「MicroVM ごとのエンドポイント」だけに使う -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
@@ -25,7 +26,8 @@
   .grp { position: absolute; border: 2px solid var(--ink); }
   .grp > .gl { position: absolute; left: -2px; top: -2px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
   .grp > .gl img { width: 32px; height: 32px; }
-  .grp > .gl .en { font-family: var(--font-mono); font-weight: 800; font-size: 15px; letter-spacing: .04em; }
+  /* 枠の名前はコードではないため、図の文字の下限の 16px にする */
+  .grp > .gl .en { font-family: var(--font-mono); font-weight: 800; font-size: 16px; letter-spacing: .04em; }
 
   .app { position: absolute; height: 44px; border: 2px solid var(--ink); background: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; }
   .api { position: absolute; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 22px; }
@@ -46,6 +48,8 @@
   .note { position: absolute; display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
   .note b { font-size: 16px; font-weight: 900; color: var(--hot); }
   .note code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+  /* 点線の矢印の凡例。見本の線は wire() で、図の点線と同じ太さと間隔で引く */
+  .legend { position: absolute; white-space: nowrap; font-size: 16px; font-weight: 700; }
 </style>
 </head><body>
 <div id="fig">
@@ -84,6 +88,11 @@
   <div class="node" id="uB" style="left:650px;top:384px"><img src="../icons/User.svg"><div class="t">利用者</div><div class="s">セッション B</div></div>
   <div class="node" id="uC" style="left:650px;top:520px"><img src="../icons/GenericApplication.svg"><div class="t">AI エージェント</div><div class="s">セッション C</div></div>
 
+  <!-- 凡例：利用者 B からの点線の矢印の意味。見本の線は y=612 に水平に引く -->
+  <div id="lgA" data-self="1" style="position:absolute;left:0;top:611.5px;width:0;height:1px"></div>
+  <div id="lgB" data-self="1" style="position:absolute;left:76px;top:611.5px;width:0;height:1px"></div>
+  <div class="legend" style="left:84px;top:600px;line-height:24px">現在はリクエストが届いていない</div>
+
   <div class="note" style="left:0;top:644px"><b>エンドポイントの形式</b><code>https://&lt;MicroVM の ID&gt;.lambda-microvm.ap-northeast-1.on.aws</code></div>
 </div>
 <script>
@@ -95,6 +104,7 @@ window.addEventListener('load', async () => { await document.fonts.ready;
   wire('#uA', '#eA', {from: 'l', to: 'r'});
   wire('#uB', '#eB', {from: 'l', to: 'r', dash: true});
   wire('#uC', '#eC', {from: 'l', to: 'r'});
+  wire('#lgA', '#lgB', {from: 'r', to: 'l', dash: true});
   document.body.dataset.ready = '1';
 });
 </script>

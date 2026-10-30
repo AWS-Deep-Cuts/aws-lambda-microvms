@@ -4,27 +4,36 @@
      左はスナップショットの内容。server.py のプロセスの中の値（boot_id、random モジュールの内部状態、ready フックの記録）と、カーネルの乱数生成器。
      右は 2 台の応答の例。値は説明用の例で、キーと形は hands-on/app/server.py の /random（json.dumps の indent=2）と同じ。
      差し色は「2 台で同じ値になるもの」だけに使う（スナップショットの中の boot_id と random の内部状態、応答の boot_id と random_random の行、左下の説明）。
+     右上の見出しでは、差し色の行を「色を付けた行」と呼ぶ（「色を付けた行は 2 台で同じ値になる」）。
      根拠:
      - server.py: BOOT_ID = str(uuid.uuid4()) はプロセスの起動時（イメージの作成中）に 1 回だけ生成する。/random は random.random()、os.urandom(8).hex()、str(uuid.uuid4()) を返す。
        Python の random モジュールは import 時に内部状態を初期化する。uuid.uuid4() は呼び出すたびに os.urandom(16) を使う
      - "Content such as unique IDs, secrets, or network connections generated during the build is shared across all MicroVMs from the same image version,
        so generate it after the MicroVM starts instead."（docs microvms-best-practices、factsheet 091）
      - 公式 skill aws-lambda-microvms の references/snapshots-and-uniqueness.md: Python は secrets か random.SystemRandom を使い、既定のシードの random.random() は使わない。
-       一意な値は run フックで生成する
-     - Firecracker の docs/snapshotting/random-for-clones.md: VMGenID で復元をゲストに通知し、Linux 5.18 以降のカーネルは乱数生成器に新しい種を混ぜ直す（reseed。
-       Linux の add_vmfork_randomness → crng_reseed。乱数生成器を作り直すのではない）。記事と README の手順 6 の「新しい種を混ぜ直す」と同じ表現
+       MicroVM ごとに異なるべき値は run フックで生成する。"the kernel RNG reseeds on resume"（カーネルの乱数生成器は、復元のたびにシードを更新する）
+     - Firecracker の docs/snapshotting/random-for-clones.md: VMGenID で復元をゲストに通知し、通知に対応したカーネルは乱数生成器のシードを新しい値で更新する
+       （ACPI のシステムでは Linux 5.18 以降。ARM64 で使う DeviceTree への対応は Linux 6.10 からで、Firecracker は 6.1 に取り込んで使う。reseed。
+       Linux の add_vmfork_randomness → crng_reseed。乱数生成器を作り直すのではない）。記事と README の手順 6 の「乱数生成器のシードを新しい値で更新する」と同じ表現。
+       シードは、乱数生成器が生成する値の並びを決める元の値（記事・README と同じ定義）
        "State other than the guest kernel entropy pool, such as unique identifiers, cached random numbers, cryptographic tokens, etc will still be replicated"（factsheet R1-17）
-     設計書との違い: スナップショットの内容に「カーネルの乱数生成器」を足した（右下の説明と対応させるため）。助言「一意な値は run フックのあとに
-     secrets モジュールで生成する」は、2 つの説明の下の帯に分けた。値の例は、README の手順 6 と同じく、各 MicroVM に GET /random を 1 回ずつ送った場合。
+       MicroVM のカーネルについては、公式 skill の "the kernel RNG reseeds on resume" を根拠に、右下の説明を言い切る（記事も Agent Skill の記述で説明している）
+     設計書との違い: スナップショットの内容に「カーネルの乱数生成器」を足した（右下の説明と対応させるため）。助言「MicroVM ごとに異なるべき乱数の値は
+     run フックのあとに secrets モジュールで生成する」は、2 つの説明の下の帯に分けた。「異なるべき値」は記事・README と同じ言い方。
+     帯の対象は「乱数の値」に限る。Agent Skill（snapshots-and-uniqueness.md）は、MicroVM ごとの値の作り方として、run フックで生成する方法、
+     CSPRNG（Python では secrets）から読む方法、runHookPayload で渡す方法を挙げ、秘密情報は実行用ロールで Secrets Manager などから取得するとしている。
+     記事は「run フックで値を受け取る方法」と「起動後に暗号論的に安全な乱数生成器で作成する方法」、README は「乱数から値を生成する方法として」secrets を挙げる。
+     そのため、秘密情報のような値まで secrets で生成すると読めないようにする。値の例は、README の手順 6 と同じく、各 MicroVM に GET /random を 1 回ずつ送った場合。
      「2 台で同じ」は、2 台が同じビルドのスナップショットから復元された場合（記事・README の手順 6 の注記のとおり、ビルドが複数あると異なる）。
      そのため左の箱の下端に「このスナップショットから 2 台の MicroVM を復元する」と書く。
-     表記: フックの名前は記事・README と同じく「ready フック」「run フック」と書く。説明の文は、すべて「。」で終える
+     表記: フックの名前は記事・README と同じく「ready フック」「run フック」と書く。説明の文は、すべて「。」で終える。
+     見出しと箱の題と下の帯の文には読点を使わない
      線は MicroVM イメージから 2 台への分岐だけで、すべて水平か垂直 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 684px; }
+  #fig { width: 800px; height: 708px; }
   code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
 
   /* MicroVM イメージ：スナップショットの内容 */
@@ -41,7 +50,7 @@
   .kern { margin: 10px 12px 0; border: 2px solid var(--grey); padding: 5px 10px; font-size: 16px; font-weight: 700; line-height: 1.4; }
   .img > .foot { margin-top: auto; padding: 8px 12px; font-size: 16px; font-weight: 700; line-height: 1.45; border-top: 2px solid var(--ink); background: var(--bone); }
 
-  /* GET /random の応答。差し色の行は 2 台で同じ値 */
+  /* GET /random の応答。色を付けた行は 2 台で同じ値 */
   .rowl code { font-size: 16px; }
   .vm { position: absolute; border: 3px solid var(--ink); background: #fff; }
   .vm > .h { background: var(--ink); color: #fff; font-size: 17px; font-weight: 900; padding: 6px 12px; line-height: 1.45; }
@@ -79,7 +88,7 @@
   </div>
 
   <!-- 右：2 台の GET /random の応答の例 -->
-  <div class="rowl" style="left:296px;top:4px"><code>GET /random</code> の応答の例 <em>・ 差し色の行は、2 台で同じ値になる</em></div>
+  <div class="rowl" style="left:296px;top:4px"><code>GET /random</code> の応答の例 <em>・ 色を付けた行は 2 台で同じ値になる</em></div>
 
   <div class="vm" id="vA" style="left:296px;top:34px;width:504px;height:194px">
     <div class="h">MicroVM A</div>
@@ -91,15 +100,15 @@
   </div>
 
   <!-- 下：同じになる理由と、異なる理由。いちばん下に対策 -->
-  <div class="note hot" id="n1" style="left:0;top:470px;width:392px;height:154px">
-    <b>プロセスの中の値は、2 台で同じになる</b>
+  <div class="note hot" id="n1" style="left:0;top:470px;width:392px;height:178px">
+    <b>プロセスの中の値は 2 台で同じになる</b>
     <span><code>boot_id</code> と <code>random</code> モジュールの内部状態は、<br>イメージの作成中に生成され、<br>スナップショットに含まれる。</span>
   </div>
-  <div class="note" id="n2" style="left:408px;top:470px;width:392px;height:154px">
-    <b>カーネルから取得した乱数は、2 台で異なる</b>
-    <span><code>os.urandom()</code> と <code>uuid4()</code> は、呼び出すたびに<br>カーネルの乱数生成器から値を取得する。<br>Firecracker が復元をカーネルに通知し、<br>カーネルが乱数生成器に新しい種を混ぜ直す。</span>
+  <div class="note" id="n2" style="left:408px;top:470px;width:392px;height:178px">
+    <b>カーネルから取得した乱数は 2 台で異なる</b>
+    <span><code>os.urandom()</code> と <code>uuid4()</code> は、呼び出すたびに<br>カーネルの乱数生成器から値を取得する。<br>Firecracker が復元をカーネルに通知し、<br>カーネルが乱数生成器のシードを<br>新しい値で更新する。</span>
   </div>
-  <div class="fix" style="left:0;top:636px;width:800px;height:46px"><i>対策</i><span>MicroVM ごとに一意な値は、<code>run</code> フックのあとに <code>secrets</code> モジュールで生成する</span></div>
+  <div class="fix" style="left:0;top:660px;width:800px;height:46px"><i>対策</i><span>MicroVM ごとに異なるべき乱数の値は <code>run</code> フックのあとに <code>secrets</code> モジュールで生成する</span></div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;

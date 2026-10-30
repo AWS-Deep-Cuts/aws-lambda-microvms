@@ -1,6 +1,8 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <!-- billing: Lambda MicroVMs の料金の 4 つの要素と、最小のベースラインで 1 時間稼働させたときの ① の計算例（記事「料金」）。
+     ①〜④ の見出しは、記事の料金の表の行と同じ料金の名前にする: ① vCPU とメモリの料金、② スナップショットの保存料金、
+     ③ スナップショットの読み取り料金と書き込み料金、④ データ転送の料金（GLOSSARY の「保存料金」「書き込み料金」「読み取り料金」）。
      題を「MicroVM の料金」ではなく「Lambda MicroVMs の料金」とするのは、② に MicroVM を 1 台も起動していない間もかかる
      MicroVM イメージの保存料金が含まれるため
      根拠:
@@ -11,7 +13,8 @@
        APN1-Lambda-MicroVM-Snapshot-Write-GB $0.0046556039 / GB（"Size of snapshot written during MicroVM suspend"）。factsheet 093, 095, 096
      - 課金の要素はコンピュート・スナップショットの読み書きと保存・データ転送（AWS の標準料金）。SUSPENDED の間はコンピュートの料金がかからず、
        スナップショットの保存料金だけがかかる（Lambda の FAQ と料金ページ、factsheet 097, R1-14）
-     - MicroVM イメージのバージョンも、MicroVM を動かしていなくても保存料金がかかる（公式の Agent Skill、factsheet 098）
+     - MicroVM イメージのバージョンも、MicroVM を動かしていなくても保存料金がかかる（公式の Agent Skill、factsheet 098）。
+       その単価は公式に明記されていないため、記事と同じく、サスペンド中のスナップショットと同じ単価と仮定し、② にそのことを書く
      - ベースラインは 2 GB あたり 1 vCPU で、最小は 0.5 GB と 0.25 vCPU。ピークはベースラインの 4 倍。ベースラインを超えた分は、使った分だけ秒単位で課金
        （"you're billed at the baseline rate while running plus per-second charges for usage above it"、factsheet 051, R1-14）。
        超えた分の単価は公式に明記されていない。Price List のコンピュートの SKU は vCPU 秒と GB 秒の 2 つだけのため、同じ単価として計算し、
@@ -19,11 +22,13 @@
        ハンズオンのイメージは create-microvm-image の resources の minimumMemoryInMiB 512 で作る
      - 計算: (0.25 × 0.0000322421 + 0.5 × 0.0000042688) × 3,600 = $0.0367（約 $0.037）、
              (1 × 0.0000322421 + 2 × 0.0000042688) × 3,600 = $0.1468（約 $0.147、factsheet 100 と一致）
-     棒の長さは金額に比例させている（$0.147 を 380px とした） -->
+     棒の長さは金額に比例させている（$0.147 を 380px とした）。
+     ③ の見出しが長いため、右の単価の列と区切りの線を 16px 右に寄せている（見出しと区切りの線が重ならないように）。
+     サスペンド中の行の $0 は ① の額。サスペンド中の料金の合計と読まれないよう、「① はかからない。サスペンド中は ② だけがかかる」と書く -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <style>
-  #fig { width: 800px; height: 860px; }
+  #fig { width: 800px; height: 884px; }
 
   /* 式: MicroVM の料金 = ① + ② + ③ + ④ */
   .eq { position: absolute; left: 0; top: 0; width: 800px; height: 54px; background: var(--ink); color: #fff;
@@ -36,8 +41,9 @@
   .term .tt { position: absolute; left: 16px; top: 10px; font-size: 19px; font-weight: 900; line-height: 1.3; }
   .term .tt .n { color: var(--hot); margin-right: 6px; }
   .term .wh { position: absolute; left: 16px; top: 42px; width: 420px; font-size: 16px; font-weight: 500; line-height: 1.5; }
-  .term .div { position: absolute; left: 452px; top: 12px; bottom: 12px; border-left: 2px solid var(--line); }
-  .term .fx { position: absolute; left: 470px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .term .div { position: absolute; left: 468px; top: 12px; bottom: 12px; border-left: 2px solid var(--line); }
+  .term .fx { position: absolute; left: 486px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .term .wh .asm2 { display: block; color: #4a4843; }
   .term .fx .r { display: grid; grid-template-columns: 112px 30px auto; align-items: baseline; font-size: 17px; font-weight: 700; }
   .term .fx .r .q { text-align: right; }
   .term .fx .r .op { text-align: center; font-size: 17px; }
@@ -80,7 +86,7 @@
 
   <!-- ① -->
   <div class="term" style="top:66px;height:80px">
-    <div class="tt"><span class="n">①</span>稼働中の vCPU とメモリ</div>
+    <div class="tt"><span class="n">①</span>vCPU とメモリの料金</div>
     <div class="wh">MicroVM が <span class="st8">RUNNING</span> の間、秒単位でかかる</div>
     <div class="div"></div>
     <div class="fx">
@@ -90,9 +96,9 @@
   </div>
 
   <!-- ② -->
-  <div class="term" style="top:156px;height:100px">
-    <div class="tt"><span class="n">②</span>スナップショットの保存</div>
-    <div class="wh">MicroVM イメージと、サスペンド中の MicroVM の<br>スナップショットを保存している間かかる</div>
+  <div class="term" style="top:156px;height:124px">
+    <div class="tt"><span class="n">②</span>スナップショットの保存料金</div>
+    <div class="wh">MicroVM イメージと、サスペンド中の MicroVM の<br>スナップショットを保存している間かかる<span class="asm2">MicroVM イメージの保存料金も同じ単価と仮定した</span></div>
     <div class="div"></div>
     <div class="fx">
       <div class="r"><span class="q">GB 時間</span><span class="op">×</span><span class="p">$0.0001333333</span></div>
@@ -100,8 +106,8 @@
   </div>
 
   <!-- ③ -->
-  <div class="term" style="top:266px;height:100px">
-    <div class="tt"><span class="n">③</span>スナップショットの読み書き</div>
+  <div class="term" style="top:290px;height:100px">
+    <div class="tt"><span class="n">③</span>スナップショットの読み取り料金と書き込み料金</div>
     <div class="wh">Lambda が、起動とレジュームのときに読み取り、<br>サスペンドのときに書き込む</div>
     <div class="div"></div>
     <div class="fx">
@@ -111,39 +117,39 @@
   </div>
 
   <!-- ④ -->
-  <div class="term" style="top:376px;height:54px">
-    <div class="tt"><span class="n">④</span>データ転送</div>
+  <div class="term" style="top:400px;height:54px">
+    <div class="tt"><span class="n">④</span>データ転送の料金</div>
     <div class="div"></div>
     <div class="fx"><div class="plain">AWS の標準のデータ転送料金</div></div>
   </div>
 
-  <div class="note" style="top:440px">単価は、2026 年 10 月 28 日時点の AWS Price List の東京リージョンの値</div>
+  <div class="note" style="top:464px">単価は、2026 年 10 月 28 日時点の AWS Price List の東京リージョンの値</div>
 
   <!-- 計算例 -->
-  <div class="rowl" style="left:0;top:492px">① の計算例 <em>・ ベースラインが最小の MicroVM を 1 時間稼働させる</em></div>
-  <div class="defs" style="top:524px">
-    <div><b>ベースライン</b><span>Lambda が MicroVM に常に割り当てる vCPU とメモリ</span></div>
+  <div class="rowl" style="left:0;top:516px">① の計算例 <em>・ ベースラインが最小の MicroVM を 1 時間稼働させる</em></div>
+  <div class="defs" style="top:548px">
+    <div><b>ベースライン</b><span>Lambda が MicroVM に常に割り当てる vCPU とメモリの量</span></div>
     <div><b>ピーク</b><span>負荷が高いときに使える vCPU とメモリの上限で、ベースラインの 4 倍</span></div>
     <div><b>ベースラインを超えた分</b><span>使った分だけ秒単位で課金される</span></div>
   </div>
 
-  <div class="axis" style="left:206px;top:628px;height:222px"></div>
+  <div class="axis" style="left:206px;top:652px;height:222px"></div>
 
-  <div class="bl" style="top:628px"><b>ベースラインだけを使う</b><span>0.25 vCPU と 0.5 GB</span></div>
-  <div class="bar end" style="left:208px;top:630px;width:95px"></div>
-  <div class="val" style="left:315px;top:630px">約 $0.037</div>
-  <div class="calc" style="left:216px;top:666px">(0.25 vCPU <span class="op">×</span> $0.0000322421 <span class="op">+</span> 0.5 GB <span class="op">×</span> $0.0000042688) <span class="op">×</span> 3,600 秒</div>
+  <div class="bl" style="top:652px"><b>ベースラインだけを使う</b><span>0.25 vCPU と 0.5 GB</span></div>
+  <div class="bar end" style="left:208px;top:654px;width:95px"></div>
+  <div class="val" style="left:315px;top:654px">約 $0.037</div>
+  <div class="calc" style="left:216px;top:690px">(0.25 vCPU <span class="op">×</span> $0.0000322421 <span class="op">+</span> 0.5 GB <span class="op">×</span> $0.0000042688) <span class="op">×</span> 3,600 秒</div>
 
-  <div class="bl" style="top:700px"><b>ピークを使い続ける</b><span>1 vCPU と 2 GB</span></div>
-  <div class="bar" style="left:208px;top:702px;width:95px"></div>
-  <div class="bar hot end" style="left:305px;top:702px;width:283px">ベースラインを超えた分</div>
-  <div class="val" style="left:600px;top:702px"><small>最大</small>約 $0.147</div>
-  <div class="calc" style="left:216px;top:738px">(1 vCPU <span class="op">×</span> $0.0000322421 <span class="op">+</span> 2 GB <span class="op">×</span> $0.0000042688) <span class="op">×</span> 3,600 秒</div>
+  <div class="bl" style="top:724px"><b>ピークを使い続ける</b><span>1 vCPU と 2 GB</span></div>
+  <div class="bar" style="left:208px;top:726px;width:95px"></div>
+  <div class="bar hot end" style="left:305px;top:726px;width:283px">ベースラインを超えた分</div>
+  <div class="val" style="left:600px;top:726px"><small>最大</small>約 $0.147</div>
+  <div class="calc" style="left:216px;top:762px">(1 vCPU <span class="op">×</span> $0.0000322421 <span class="op">+</span> 2 GB <span class="op">×</span> $0.0000042688) <span class="op">×</span> 3,600 秒</div>
 
-  <div class="asm" style="left:216px;top:760px">超えた分も、ベースラインの分と同じ単価で計算した</div>
+  <div class="asm" style="left:216px;top:784px">超えた分も、ベースラインの分と同じ単価で計算した</div>
 
-  <div class="bl" style="top:796px"><b>サスペンド中</b><i class="st8">SUSPENDED</i></div>
-  <div class="zero" style="left:222px;top:798px"><b>$0</b>① はかからず、② の保存料金だけがかかる</div>
+  <div class="bl" style="top:820px"><b>サスペンド中</b><i class="st8">SUSPENDED</i></div>
+  <div class="zero" style="left:222px;top:822px"><b>$0</b>① はかからない。サスペンド中は ② だけがかかる</div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready; document.body.dataset.ready = '1'; });

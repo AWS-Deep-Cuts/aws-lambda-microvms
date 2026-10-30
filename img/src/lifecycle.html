@@ -20,22 +20,33 @@
        アイドルポリシーを指定しないと、自動のサスペンドと終了は行われない（公式 skill の references/lifecycle-model.md
        "omit it to disable idle-based auto-suspend entirely"、factsheet 058）。自動のレジュームには autoResumeEnabled=true が要る
      - RunMicrovmRequest.maximumDurationInSeconds: "The maximum duration in seconds that the MicroVM can exist before being terminated
-       by the platform." RUNNING と SUSPENDED の時間の合計で数える。上限と既定は 8 時間（service-2.json、docs microvms-launching、factsheet 056）
+       by the platform." RUNNING と SUSPENDED の時間の合計で数える。上限は 8 時間。既定値は公開情報に無い（service-2.json の有効範囲は 1〜28,800 秒、
+       docs microvms-launching、factsheet 056・R1-12）
      - フック: run はスナップショットからの起動の後に送られ、200 が返ると RUNNING になる（factsheet 061）。suspend は SUSPENDING の間、
        保存の前に送られる。resume の間は SUSPENDED のままで、200 が返ると RUNNING になる。terminate は最終的な終了のときだけ送られ、
        サスペンドのときには送られない（docs microvms-launching、factsheet 065、公式 skill aws-lambda-microvms の references/lifecycle-model.md）。
        SUSPENDED から終了するときに terminate フックが送られるかは公開情報で確かめられないため、帯には RUNNING から終了するときだけを書く
      - 料金: "Suspended MicroVMs incur snapshot storage charges but not compute charges."、TERMINATED は料金がかからない（AWS Lambda FAQ、factsheet 097）
      - 状態の遷移: 公式 skill の references/lifecycle-model.md「MicroVM state machine」
+     - スナップショットの読み取り料金は起動とレジュームのとき、書き込み料金はサスペンドのときにかかる（AWS Price List の Snapshot-Read-GB
+       "Size of snapshot read during MicroVM run or resume"、Snapshot-Write-GB "Size of snapshot written during MicroVM suspend"、factsheet 096）。
+       レジュームの処理は SUSPENDED のまま行われるため、図の下の注記にこの 2 つの料金を書き、SUSPENDED の料金の帯とあわせて記事の状態の表と合わせる
+     - アイドルポリシーの「リクエストが無い」は、エンドポイントへのリクエストで判定する（"Idle time is measured by inbound traffic through the MicroVM proxy endpoint"）。
+       そのため、自動のサスペンドのきっかけを「設定した時間 / エンドポイントへの / リクエストが無い」と書く
      表記: フックの名前は記事・README と同じく「run フック」のように書く（パスの /aws/lambda-microvms/runtime/v1/run と区別する）。
      札の文字は 19px の太字にして、白い文字と背景の差を大きな文字の基準（3:1）以上にする。
-     省略したもの: PENDING と SUSPENDING からの TerminateMicrovm、run フックの失敗による終了、スナップショットの読み書きの料金（billing の図で扱う）。
+     凡例の 3 行目は「アイドルポリシーで設定したときだけ、Lambda が自動で行う」。自動のサスペンド・レジューム・終了の 3 つの札が、
+     アイドルポリシーを設定したときだけ働くことを、この行で示す。きっかけの太字の文には読点を使わず、改行で区切る。
+     料金の名前は記事・README と同じ「vCPU とメモリの料金」「スナップショットの保存料金」「読み取り料金」「書き込み料金」。
+     省略したもの: PENDING と SUSPENDING からの TerminateMicrovm、run フックの失敗による終了。
      線はすべて水平か垂直 -->
 <link rel="stylesheet" href="diagram.css">
 <link rel="stylesheet" href="deepcuts.css">
 <script src="wires.js"></script>
 <style>
-  #fig { width: 800px; height: 844px; }
+  #fig { width: 800px; height: 884px; }
+  /* 図の下の注記：スナップショットの読み取り料金と書き込み料金 */
+  .foot { position: absolute; left: 0; font-size: 16px; font-weight: 700; line-height: 24px; white-space: nowrap; }
 
   /* 状態を変えるきっかけ。1 行ごとに、誰が行うかの札を付ける */
   .trig { position: absolute; display: flex; flex-direction: column; gap: 6px; }
@@ -80,11 +91,11 @@
   <div class="legend">
     <div class="row"><span class="who">あなた</span><span>あなたが API を呼び出す</span></div>
     <div class="row"><span class="who auto">自動</span><span>Lambda が自動で行う</span></div>
-    <div class="row"><span class="who idle">自動</span><span>アイドルポリシーで設定した<br>ときだけ、Lambda が自動で行う</span></div>
+    <div class="row"><span class="who idle">自動</span><span>アイドルポリシーで設定したときだけ、<br>Lambda が自動で行う</span></div>
   </div>
 
   <!-- 起動。RunMicrovm から PENDING の上端へ下ろす（x=134） -->
-  <div class="trig" id="tRun" style="left:46px;top:0"><div class="row"><span class="who">あなた</span><span class="api">RunMicrovm</span></div></div>
+  <div class="trig" id="tRun" style="left:45px;top:0;width:178px"><div class="row"><span class="who">あなた</span><span class="api">RunMicrovm</span></div></div>
   <div class="mid" id="pending" style="left:0;top:68px;width:268px;height:98px"><b>PENDING</b><span>Lambda がスナップショットを<br>復元し、<code>run</code> フックを送る</span></div>
 
   <!-- 実行中とサスペンド。RUNNING と SUSPENDING の中心の高さ（y=275）をそろえ、サスペンドの線を水平にする -->
@@ -93,9 +104,9 @@
     <div class="d">アプリがリクエストを処理する</div>
     <div class="fee">vCPU とメモリの料金がかかる</div>
   </div>
-  <div class="trig" id="tSus" style="left:284px;top:183px">
+  <div class="trig" id="tSus" style="left:284px;top:160px">
     <div class="row"><span class="who">あなた</span><span class="api">SuspendMicrovm</span></div>
-    <div class="row"><span class="who idle">自動</span><span class="cond">設定した時間、<br>リクエストが無い</span></div>
+    <div class="row"><span class="who idle">自動</span><span class="cond">設定した時間<br>エンドポイントへの<br>リクエストが無い</span></div>
   </div>
   <div class="mid" id="suspending" style="left:532px;top:214px;width:268px;height:122px"><b>SUSPENDING</b><span>Lambda が <code>suspend</code> フックを<br>送り、メモリとディスクの<br>内容を保存する</span></div>
   <div class="stay" id="suspended" style="left:532px;top:384px;width:268px;height:144px">
@@ -128,6 +139,9 @@
     <div class="h">TERMINATED</div>
     <div class="fee">料金はかからない</div>
   </div>
+
+  <!-- 図の下の注記。読み取り料金と書き込み料金は、状態ではなく起動・レジューム・サスペンドの処理にかかる -->
+  <div class="foot" style="top:860px">スナップショットの読み取り料金は起動とレジュームのとき、書き込み料金はサスペンドのときにかかる</div>
 </div>
 <script>
 window.addEventListener('load', async () => { await document.fonts.ready;
