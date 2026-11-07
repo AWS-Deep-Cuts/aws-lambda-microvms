@@ -289,6 +289,25 @@ class Sandbox:
 
 
 # ── Amazon Bedrock にコードを書かせる ──────────────────────────────
+def strip_code_fences(text: str) -> str:
+    """モデルの返答から、コードの前後のコードフェンス（```python や末尾の ```）を取り除く
+
+    返答の書き出しを「```python」にしておいても、モデルによっては、末尾の ``` が返答に残ったり、
+    フェンスで囲んだコードを改めて返したりする。どの形でも、コードの中身だけを返す。
+    """
+    text = text.strip("\n")
+    # フェンスで囲んだコードがあれば、最初のブロックの中身だけを使う
+    match = re.search(r"```[\w+-]*[ \t]*\n(.*?)\n?[ \t]*```", text, re.S)
+    if match:
+        return match.group(1).strip("\n")
+    # 先頭に開きのフェンスだけがあれば取り除く
+    text = re.sub(r"^[ \t]*```[\w+-]*[ \t]*(?:\n|$)", "", text)
+    # 閉じのフェンスだけが残っていれば、フェンスとその後ろ（説明の文など）を取り除く
+    if "```" in text:
+        text = text.split("```", 1)[0]
+    return text.rstrip().strip("\n")
+
+
 def ask_ai(region: str, request: str) -> Optional[str]:
     br = boto3.client("bedrock-runtime", region_name=region, config=BotoConfig(retries={"max_attempts": 5, "mode": "adaptive"}))
     try:
@@ -312,8 +331,7 @@ def ask_ai(region: str, request: str) -> Optional[str]:
     text = "".join(block["text"] for block in resp["output"]["message"]["content"] if "text" in block)
     if resp.get("stopReason") == "max_tokens":
         print("  （出力が途中で切れました。依頼を小さく分けてください）")
-    match = re.search(r"```(?:python)?\n(.*?)```", text, re.S)   # フェンスが残っていたら中身だけ
-    return (match.group(1) if match else text).strip("\n")
+    return strip_code_fences(text)
 
 
 def print_result(result: Optional[dict]) -> None:
