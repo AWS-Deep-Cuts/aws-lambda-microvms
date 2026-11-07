@@ -791,7 +791,19 @@ python3 -c "import boto3; print('OK' if 'lambda-microvms' in boto3.session.Sessi
 python3 sandbox.py
 ```
 
-「NG」と表示された場合は、boto3 を更新する前に、`python3 --version` で Python のバージョンを確認してください。3.10 より古い場合は、boto3 を更新しても Lambda MicroVMs に対応した版にならないため、手順 7 は実行できません。その場合は、手順 8 の後片付けに進んでください。`No module named 'boto3'` と表示された場合は、コメントにある `pip` のコマンドで boto3 をインストールします。
+「NG」と表示された場合は、boto3 を更新する前に、`python3 --version` で Python のバージョンを確認してください。3.10 より古い場合は、`python3` の boto3 を更新しても、Lambda MicroVMs に対応した版になりません。たとえば Python 3.9 では、boto3 を更新しても 1.42.97 までしか上がらず、「NG」のままです。`No module named 'boto3'` と表示された場合も、Python のバージョンを確認してください。Python が 3.10 以上であれば、コメントにある `pip` のコマンドで boto3 をインストールします。
+
+Python が 3.10 より古い場合は、次のコマンドで Python 3.11 と、それに対応した boto3 をインストールします。以降は、`python3` の代わりに `python3.11` を使います。sandbox.py は、Python 3.10 より古い `python3` で起動すると、このコマンドを表示して止まります。
+
+```bash
+sudo dnf install -y python3.11 python3.11-pip
+python3.11 -m pip install --user --upgrade boto3
+python3.11 -c "import boto3; print('OK' if 'lambda-microvms' in boto3.session.Session().get_available_services() else 'NG', boto3.__version__)"
+
+python3.11 sandbox.py
+```
+
+`dnf` でインストールした Python 3.11 は、CloudShell のセッションが終わると消えることがあります。CloudShell を開き直した場合は、上のコマンドをもう一度実行してください。
 
 `>>>` が表示されたら、Python のコードと `:ai` を試します。`:ai` では、生成されたコードが表示され、`y` を入力したときだけ MicroVM の中で実行されます。
 
@@ -898,7 +910,8 @@ sudo rm -rf aws-lambda-microvms
 | エンドポイントが `HTTP 401` や `HTTP 403` のような 400 番台のステータスコードを返す | 変数 `TOKEN` が空で認証トークンが付いていない、認証トークンの有効期限が切れた、または認証トークンで許可していないポートにアクセスした | 手順 4-2 のコマンドで、新しい認証トークンを取得する。`X-aws-proxy-port` を付けた場合は、認証トークンで許可したポートかどうかを確認する |
 | `ServiceQuotaExceededException` | サスペンド中のものを含め、すべての MicroVM に割り当てたメモリの合計が、アカウントのクォータを超えた | 不要な MicroVM を終了する。サスペンドしただけでは、割り当てたメモリの合計は減らない |
 | `:ai` で `Bedrock を呼び出せませんでした` と表示される | Bedrock の権限が足りない、またはモデルを使えない。括弧の中が `ValidationException` で `on-demand throughput isn’t supported` を含む場合は、モデル ID ではなく推論プロファイルの ID を指定する必要がある | `bedrock:InvokeModel` の権限を確認する。sandbox.py の既定のモデルは、推論プロファイル `jp.amazon.nova-2-lite-v1:0`。別のモデルを使う場合は、環境変数 `DEEPCUTS_MODEL` に推論プロファイルまたはモデルの ID を指定する |
-| `この boto3 は lambda-microvms に対応していません` | boto3 が古い | `python3 -m pip install --user --upgrade boto3` を実行する。boto3 の更新には Python 3.10 以上が必要。`python3 --version` が 3.10 より古い場合は、手順 7 を省略する |
+| `この boto3 は lambda-microvms に対応していません` | boto3 が古い | `python3 -m pip install --user --upgrade boto3` を実行する。boto3 の更新には Python 3.10 以上が必要。`python3 --version` が 3.10 より古い場合は、手順 7 の方法で Python 3.11 をインストールし、`python3.11` で sandbox.py を起動する |
+| `sandbox.py には Python 3.10 以上が必要です` | `python3` が Python 3.9 など、3.10 より古い | 表示されたコマンドで Python 3.11 と boto3 をインストールし、`python3.11 sandbox.py` で起動する（手順 7） |
 
 ### イメージの作成が失敗した理由を調べる
 

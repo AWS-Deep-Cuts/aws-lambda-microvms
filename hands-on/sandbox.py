@@ -3,6 +3,7 @@
 
 README の手順 7 で使います。CloudShell（東京リージョン）の hands-on ディレクトリで実行します:
   python3 sandbox.py
+  （python3 が 3.9 の場合は、README の手順 7 のとおり Python 3.11 と boto3 をインストールし、python3.11 sandbox.py で起動します）
 
 起動すると、手順 2 で作成した MicroVM イメージから MicroVM を 1 台起動します。
 >>> に Python のコードを入力すると、MicroVM の中の server.py に POST /exec で送って実行します。
@@ -14,7 +15,8 @@ README の手順 7 で使います。CloudShell（東京リージョン）の ha
 
 内部で呼び出す API は、README の手順 3〜6 で実行した CLI のコマンドと同じです（RunMicrovm、GetMicrovm、
 CreateMicrovmAuthToken、SuspendMicrovm、ResumeMicrovm、TerminateMicrovm）。呼び出すたびに「→ API 名」を表示します。
-Python の標準ライブラリと boto3 だけで動きます。boto3 は 1.43.35 以降が必要で、boto3 の 1.43 系は Python 3.10 以上で動きます。
+Python の標準ライブラリと boto3 だけで動きます。boto3 は 1.43.35 以降が必要で、boto3 の 1.43 系は Python 3.10 以上で動きます
+（Python 3.9 では boto3 を更新しても 1.42.97 までしか上がりません）。
 """
 from __future__ import annotations
 
@@ -27,12 +29,28 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
+PY_CMD = f"python{sys.version_info.major}.{sys.version_info.minor}"
+PY311_HINT = ("   CloudShell では、次のコマンドで Python 3.11 と boto3 をインストールし、python3.11 で起動してください（README の手順 7）。\n"
+              "     sudo dnf install -y python3.11 python3.11-pip\n"
+              "     python3.11 -m pip install --user --upgrade boto3\n"
+              "     python3.11 sandbox.py")
+
+# boto3 の Lambda MicroVMs に対応した版（1.43.35 以降）は、Python 3.10 以上でしか動かない。
+# Python 3.9 では boto3 を更新しても 1.42.97 までしか上がらないため、先に版を確かめて止める
+if sys.version_info < (3, 10):
+    sys.exit(f"❌ sandbox.py には Python 3.10 以上が必要です（この python の版は {sys.version.split()[0]}）。\n"
+             "   Python 3.9 では、boto3 を更新しても Lambda MicroVMs に対応した版になりません。\n" + PY311_HINT)
+
 try:
     import readline  # noqa: F401  入力履歴と行編集（無い環境でも動く）
 except ImportError:
     pass
 
-import boto3
+try:
+    import boto3
+except ImportError:
+    sys.exit(f"❌ この Python（{PY_CMD}）に boto3 がインストールされていません。\n"
+             f"   {PY_CMD} -m pip install --user --upgrade boto3 を実行してから、もう一度 {PY_CMD} sandbox.py を起動してください。")
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError, UnknownServiceError
 
@@ -103,8 +121,8 @@ class Sandbox:
         try:
             self.lmv = boto3.client("lambda-microvms", region_name=self.region)
         except UnknownServiceError:
-            sys.exit("❌ この boto3 は lambda-microvms に対応していません（1.43.35 以降が必要です）。\n"
-                     "   python3 -m pip install --user --upgrade boto3 を実行してから、もう一度 python3 sandbox.py を起動してください。")
+            sys.exit(f"❌ この boto3（{boto3.__version__}）は lambda-microvms に対応していません（1.43.35 以降が必要です）。\n"
+                     f"   {PY_CMD} -m pip install --user --upgrade boto3 を実行してから、もう一度 {PY_CMD} sandbox.py を起動してください。")
         self.image_arn = cfg.get("IMAGE_ARN") or self._find_image(cfg.get("IMAGE_NAME", "aws-deepcuts-sandbox"))
         self.microvm_id: Optional[str] = None
         self.endpoint: Optional[str] = None
