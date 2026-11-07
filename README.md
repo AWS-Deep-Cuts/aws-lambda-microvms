@@ -508,10 +508,10 @@ echo "${ENDPOINT}"
 <!-- 要確認: Lambda コンソールで MicroVM の一覧を開く画面の名前と順序を、実機で確かめて直す -->
 <!-- 画面写真: Lambda コンソールの MicroVM の一覧。起動した MicroVM の ID と状態 RUNNING を枠で囲む -->
 
-<!-- 画面写真: CloudWatch Logs のログストリーム（名前は MicroVM の ID）。run フックの行を枠で囲む -->
+<!-- 画面写真: CloudWatch Logs のログストリーム（名前に MicroVM の ID を含む）。run フックの行を枠で囲む -->
 
 > **この手順で確かめること**
-> - **やること**: まず、Lambda コンソールで MicroVM の一覧を開き、起動した MicroVM の状態を確認します。次に、CloudWatch Logs のコンソールで、ロググループ `/aws/lambda-microvms/aws-deepcuts` を開きます。名前が MicroVM の ID のログストリームを開き、`hook POST /aws/lambda-microvms/runtime/v1/run` の行を探します。
+> - **やること**: まず、Lambda コンソールで MicroVM の一覧を開き、起動した MicroVM の状態を確認します。次に、CloudWatch Logs のコンソールで、ロググループ `/aws/lambda-microvms/aws-deepcuts` を開きます。名前に MicroVM の ID を含むログストリーム（`2026/11/05[1.0]microvm-...` のように、日付とイメージのバージョンが前に付きます）を開き、`hook POST /aws/lambda-microvms/runtime/v1/run` の行を探します。
 > - **期待する結果**: MicroVM の一覧に、`MICROVM_ID` と同じ ID の MicroVM が `RUNNING` の状態で表示されています。起動から 5 分以上が経過している場合は、アイドルポリシーにより、`SUSPENDING` または `SUSPENDED` と表示されることがあります。この場合も、手順 4-3 で認証トークンを付けたリクエストを送ると、Lambda が自動で MicroVM をレジュームします。ログの行の `body` には、`microvmId` と `runHookPayload` が含まれています。`runHookPayload` の値は `--run-hook-payload` で指定した文字列で、ログでは `"{\"user\": \"handson\"}"` のように、引用符の前にバックスラッシュが付いた形で表示されます。
 > - **ここから分かること**: MicroVM を起動すると、Lambda は run フックでアプリに起動を通知し、`--run-hook-payload` の文字列を渡します。アプリがこのフックに 200 を返してから、エンドポイントへのリクエストがアプリに届くようになります。API リファレンスによると、`--run-hook-payload` は、秘密情報の保存場所の名前のような、あなたが開発するサービスの利用者ごとの設定を、MicroVM に渡すために使います。
 
