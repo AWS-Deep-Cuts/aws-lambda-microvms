@@ -150,7 +150,11 @@ CloudShell を使う権限は、このポリシーとは別に必要です。た
       "Sid": "Bedrock",
       "Effect": "Allow",
       "Action": "bedrock:InvokeModel",
-      "Resource": "arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-lite-v1:0"
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1:*:inference-profile/jp.amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:ap-northeast-3::foundation-model/amazon.nova-2-lite-v1:0"
+      ]
     },
     {
       "Sid": "ConsoleRead",
@@ -163,6 +167,8 @@ CloudShell を使う権限は、このポリシーとは別に必要です。た
 ```
 
 `lambda:PassNetworkConnector` が無いと、手順 3 の `run-microvm` が `AccessDeniedException` で失敗します。
+
+`Bedrock` のステートメントは、sandbox.py の既定の推論プロファイル `jp.amazon.nova-2-lite-v1:0` を使う場合の例です。推論プロファイルは、リクエストを東京（`ap-northeast-1`）と大阪（`ap-northeast-3`）のリージョンに振り分けるため、推論プロファイルと、両方のリージョンのモデルを許可しています。
 </details>
 
 以降、各種コマンドは、東京リージョンで開いた[CloudShell](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html)で実行してください。
