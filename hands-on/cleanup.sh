@@ -101,15 +101,38 @@ if [[ -n "${BUCKET_NAME:-}" ]]; then
     echo "  削除: s3://${BUCKET_NAME}"
   fi
 fi
-rm -f "${SCRIPT_DIR:?}/app.zip" "${SCRIPT_DIR:?}/.sandbox-state.json"
-echo "  削除: app.zip、.sandbox-state.json"
+# 実際にあったファイルだけを削除し、表示する
+REMOVED=""
+for FILE in app.zip .sandbox-state.json; do
+  if [[ -e "${SCRIPT_DIR:?}/${FILE}" ]]; then
+    rm -f "${SCRIPT_DIR:?}/${FILE}"
+    REMOVED="${REMOVED:+${REMOVED}、}${FILE}"
+  fi
+done
+if [[ -n "${REMOVED}" ]]; then
+  echo "  削除: ${REMOVED}"
+fi
 echo ""
 
 echo "残っているリソースを確認..."
 LEFT=0
-if [[ -n "${IMAGE_ARN}" ]] && aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
-     --query state --output text 2>/dev/null | grep -qv -E "DELETED|DELETING"; then
-  echo "  ⚠️  MicroVM イメージが残っています: ${IMAGE_ARN}"; LEFT=1
+IMAGE_DELETING=""
+if [[ -n "${IMAGE_ARN}" ]]; then
+  # 削除を依頼した直後のイメージは、しばらく DELETING のまま残るため、5 秒おきに最大 2 分、消えるのを待つ
+  for _ in $(seq 1 24); do
+    IMAGE_STATE=$(aws lambda-microvms get-microvm-image --image-identifier "${IMAGE_ARN}" --region "${REGION}" \
+      --query state --output text 2>/dev/null || true)
+    [[ "${IMAGE_STATE}" == "DELETING" ]] || break
+    sleep 5
+  done
+  case "${IMAGE_STATE}" in
+    ""|"None"|"DELETED") ;;
+    "DELETING")
+      echo "  ⏳ MicroVM イメージはまだ削除中です（DELETING）。数分で一覧から消えます: ${IMAGE_ARN}"
+      IMAGE_DELETING="yes" ;;
+    *)
+      echo "  ⚠️  MicroVM イメージが残っています（${IMAGE_STATE}）: ${IMAGE_ARN}"; LEFT=1 ;;
+  esac
 fi
 for ROLE in "${BUILD_ROLE_NAME:-}" "${EXEC_ROLE_NAME:-}"; do
   [[ -n "${ROLE}" ]] && aws iam get-role --role-name "${ROLE}" >/dev/null 2>&1 && { echo "  ⚠️  IAM ロールが残っています: ${ROLE}"; LEFT=1; }
@@ -122,7 +145,9 @@ if [[ "${LEFT}" == "1" ]]; then
   echo "❌ 削除できなかったリソースがあります。数分待ってから、もう一度 bash ./cleanup.sh を実行してください。" >&2
   exit 1
 fi
-echo "  なし"
+if [[ -z "${IMAGE_DELETING}" ]]; then
+  echo "  なし"
+fi
 rm -f "${RESOURCE_FILE}"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
