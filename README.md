@@ -810,7 +810,7 @@ python3 sandbox.py
 
 ```text
 >>> :ai さっき定義した total という変数を 2 倍して表示して
-  → Amazon Bedrock の Converse API（モデル amazon.nova-2-lite-v1:0）でコードを生成しています…
+  → Amazon Bedrock の Converse API（モデル jp.amazon.nova-2-lite-v1:0）でコードを生成しています…
   ── AI が生成したコード ──
     1 | print(total * 2)
   ──────────────────────
@@ -897,7 +897,7 @@ sudo rm -rf aws-lambda-microvms
 | エンドポイントが `HTTP 502` を返す | 起動の直後で、スナップショットを復元している途中。または、アプリのプロセスが止まっている | 数秒待ってから再実行する。続く場合は、新しい MicroVM を起動する |
 | エンドポイントが `HTTP 401` や `HTTP 403` のような 400 番台のステータスコードを返す | 変数 `TOKEN` が空で認証トークンが付いていない、認証トークンの有効期限が切れた、または認証トークンで許可していないポートにアクセスした | 手順 4-2 のコマンドで、新しい認証トークンを取得する。`X-aws-proxy-port` を付けた場合は、認証トークンで許可したポートかどうかを確認する |
 | `ServiceQuotaExceededException` | サスペンド中のものを含め、すべての MicroVM に割り当てたメモリの合計が、アカウントのクォータを超えた | 不要な MicroVM を終了する。サスペンドしただけでは、割り当てたメモリの合計は減らない |
-| `:ai` で `Bedrock を呼び出せませんでした` と表示される | Bedrock の権限が足りない、またはモデルを使えない | `bedrock:InvokeModel` の権限を確認する。別のモデルを使う場合は、環境変数 `DEEPCUTS_MODEL` にモデル ID を指定する |
+| `:ai` で `Bedrock を呼び出せませんでした` と表示される | Bedrock の権限が足りない、またはモデルを使えない。括弧の中が `ValidationException` で `on-demand throughput isn’t supported` を含む場合は、モデル ID ではなく推論プロファイルの ID を指定する必要がある | `bedrock:InvokeModel` の権限を確認する。sandbox.py の既定のモデルは、推論プロファイル `jp.amazon.nova-2-lite-v1:0`。別のモデルを使う場合は、環境変数 `DEEPCUTS_MODEL` に推論プロファイルまたはモデルの ID を指定する |
 | `この boto3 は lambda-microvms に対応していません` | boto3 が古い | `python3 -m pip install --user --upgrade boto3` を実行する。boto3 の更新には Python 3.10 以上が必要。`python3 --version` が 3.10 より古い場合は、手順 7 を省略する |
 
 ### イメージの作成が失敗した理由を調べる

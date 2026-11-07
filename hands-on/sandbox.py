@@ -41,8 +41,9 @@ RESOURCE_FILE = os.path.join(SCRIPT_DIR, "resource-ids.env")
 STATE_FILE = os.path.join(SCRIPT_DIR, ".sandbox-state.json")
 
 # Amazon Bedrock のモデル（環境変数 DEEPCUTS_MODEL で変更可）。
-# 既定は東京リージョンで直接呼び出せる Amazon Nova 2 Lite。jp.amazon.nova-2-lite-v1:0（東京・大阪に振り分ける推論プロファイル）も可。
-DEFAULT_MODEL = os.environ.get("DEEPCUTS_MODEL", "amazon.nova-2-lite-v1:0")
+# 既定は Amazon Nova 2 Lite の推論プロファイル jp.amazon.nova-2-lite-v1:0（リクエストを東京と大阪のリージョンに振り分ける）。
+# モデル ID の amazon.nova-2-lite-v1:0 はオンデマンドでは呼び出せず、ValidationException になる。
+DEFAULT_MODEL = os.environ.get("DEEPCUTS_MODEL", "jp.amazon.nova-2-lite-v1:0")
 SYSTEM_PROMPT = (
     "You are a Python code generator for a disposable sandbox VM.\n"
     "## Model Instructions:\n"
@@ -305,7 +306,7 @@ def ask_ai(region: str, request: str) -> Optional[str]:
         code = e.response["Error"].get("Code", "")
         print(f"  ❌ Bedrock を呼び出せませんでした（{code}: {e.response['Error'].get('Message', '')[:160]}）")
         print(f"     モデル: {DEFAULT_MODEL} / リージョン: {region}。IAM の bedrock:InvokeModel 権限と、")
-        print("     環境変数 DEEPCUTS_MODEL（東京で使えるモデル ID）を確認してください。:ai 以外の機能はそのまま使えます。")
+        print("     環境変数 DEEPCUTS_MODEL（東京で使える推論プロファイルまたはモデルの ID）を確認してください。:ai 以外の機能はそのまま使えます。")
         return None
     # reasoning が有効なモデル設定では content[0] が reasoningContent になるので、text ブロックだけを連結する
     text = "".join(block["text"] for block in resp["output"]["message"]["content"] if "text" in block)
