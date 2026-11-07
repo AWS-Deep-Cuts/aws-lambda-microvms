@@ -185,7 +185,7 @@ run フックのリクエストの本文は JSON で、MicroVM の ID と、`Run
 
 開発者は、`RunMicrovm` を呼び出すときに、**実行用ロール**を指定できます。実行用ロールは、MicroVM の実行中に Lambda が引き受ける IAM ロールです。Lambda はこのロールの権限で、アプリのログを CloudWatch Logs に書き込みます。MicroVM の中のアプリも、このロールの権限で AWS のサービスを呼び出せます。
 
-起動した MicroVM には、`https://<MicroVM の ID>.lambda-microvm.<リージョン>.on.aws` という形のエンドポイントが割り当てられます。エンドポイントへのリクエストには、**認証トークン**が必要です。認証トークンは、管理用のアプリが AWS の認証情報を使って `CreateMicrovmAuthToken` API を呼び出すと、Lambda が発行します。このとき、管理用のアプリは、MicroVM の ID・アクセスを許可するポート・60 分までの有効期限を指定します。
+起動した MicroVM には、`https://<ID>.lambda-microvm.<リージョン>.on.aws` という形のエンドポイントが割り当てられます。`<ID>` の部分は、MicroVM ごとに異なる値で、MicroVM の ID とは別のものです。エンドポイントへのリクエストには、**認証トークン**が必要です。認証トークンは、管理用のアプリが AWS の認証情報を使って `CreateMicrovmAuthToken` API を呼び出すと、Lambda が発行します。このとき、管理用のアプリは、MicroVM の ID・アクセスを許可するポート・60 分までの有効期限を指定します。
 
 発行された認証トークンでは、指定した MicroVM の、指定したポートにだけアクセスできます。利用者や AI エージェントの側でエンドポイントにリクエストを送るプログラムは、管理用のアプリが取得した認証トークンを、`X-aws-proxy-auth` ヘッダーに付けて送ります。
 

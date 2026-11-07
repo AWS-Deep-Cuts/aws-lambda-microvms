@@ -483,7 +483,7 @@ aws lambda-microvms get-microvm --microvm-identifier "${MICROVM_ID}" --region "$
 {
     "microvmId": "...",
     "state": "RUNNING",
-    "endpoint": "<MicroVM の ID>.lambda-microvm.ap-northeast-1.on.aws",
+    "endpoint": "<MicroVM ごとの ID>.lambda-microvm.ap-northeast-1.on.aws",
     "imageArn": "arn:aws:lambda:ap-northeast-1:<アカウント ID>:microvm-image:...",
     "idlePolicy": {
         "maxIdleDurationSeconds": 300,
@@ -495,7 +495,7 @@ aws lambda-microvms get-microvm --microvm-identifier "${MICROVM_ID}" --region "$
 }
 ```
 
-`state` が `RUNNING` になったら、エンドポイントを変数 `ENDPOINT` に代入します。`endpoint` の値は、以降のコマンドで `https://` の後ろに付けて使います。
+`endpoint` の先頭の部分は、MicroVM ごとに異なる値で、MicroVM の ID（`microvm-` で始まる値）とは別のものです。`state` が `RUNNING` になったら、エンドポイントを変数 `ENDPOINT` に代入します。`endpoint` の値は、以降のコマンドで `https://` の後ろに付けて使います。
 
 ```bash
 ENDPOINT=$(aws lambda-microvms get-microvm --microvm-identifier "${MICROVM_ID}" \
