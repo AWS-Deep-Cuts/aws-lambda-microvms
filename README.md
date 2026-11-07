@@ -679,7 +679,7 @@ aws lambda-microvms get-microvm --microvm-identifier "${MICROVM_ID}" \
   --region "${REGION}" --query state --output text
 ```
 
-`RUNNING` と表示されるまで、2 つ目のコマンドだけを何度か実行してください。Lambda が resume フックの応答を待つ間は、状態が `SUSPENDED` と表示されることがあります。`resume-microvm` は、状態が `SUSPENDED` のときだけ実行できます。状態が `RUNNING` のときに実行すると、`ConflictException` などのエラーで失敗します。
+`RUNNING` と表示されるまで、2 つ目のコマンドだけを何度か実行してください。Lambda が resume フックの応答を待つ間は、状態が `SUSPENDED` と表示されることがあります。`resume-microvm` は、サスペンドしている MicroVM をレジュームするコマンドです。筆者が試したときは、状態が `RUNNING` のときに実行してもエラーにならず、何も起きませんでした（resume フックも届きませんでした）。状態が `SUSPENDING` や `TERMINATED` のときの振る舞いは、確かめていません。
 
 `RUNNING` と表示されたら、`/state` を取得します。
 
@@ -909,7 +909,7 @@ sudo rm -rf aws-lambda-microvms
 | `AccessDeniedException` | `lambda:PassNetworkConnector`・`iam:PassRole` などの権限が足りない | [前提条件](#前提条件)の IAM ポリシーの例と比べる |
 | イメージが `CREATE_FAILED` になる | zip の最上位に Dockerfile が無い、Dockerfile の実行に失敗した、ready フックに 200 が返らない、IAM ロールの反映が間に合わなかった | 下の「イメージの作成が失敗した理由を調べる」の手順で理由を確認する。ロールが原因の場合は、`bash ./cleanup.sh` を実行してから、同じ `hands-on` ディレクトリで `bash ./setup.sh` と `source ./resource-ids.env` を実行する。`setup.sh` が完了したら数分待ち、手順 2-2 から進める |
 | `A MicroVM image with the name ... already exists` | 同じ名前のイメージが残っている | `bash ./cleanup.sh` を実行してから、同じ `hands-on` ディレクトリで `bash ./setup.sh` と `source ./resource-ids.env` を実行し、手順 2-2 から進める |
-| `resume-microvm` が `ConflictException` や `ValidationException` で失敗する | MicroVM の状態が `SUSPENDED` ではない | `get-microvm` で状態を確認する。`RUNNING` であれば、レジュームは不要 |
+| `resume-microvm` を実行しても、`/state` の `hooks` に resume フックが増えない | MicroVM の状態が `SUSPENDED` ではなかった。`RUNNING` のときに実行すると、エラーにならず何も起きない | `get-microvm` で状態を確認する。`RUNNING` であれば、レジュームは不要。手順 5-3 では、`SUSPENDED` と表示されるまで待ってから実行する |
 | `create-microvm-auth-token` が `ConflictException` で失敗する | MicroVM を起動した直後で、Lambda が MicroVM の登録を終えていない | 数秒待ってから再実行する。続く場合は、`get-microvm` で MicroVM の状態を確認する |
 | MicroVM の状態が `TERMINATED` になっている | 最長時間が経過した、サスペンドが設定した時間続いた、または run フックに 200 が返らなかった | `aws lambda-microvms get-microvm --microvm-identifier "${MICROVM_ID}" --region "${REGION}" --query stateReason --output text` で理由を確認し、手順 3 からやり直す |
 | エンドポイントが `HTTP 502` を返す | 起動の直後で、スナップショットを復元している途中。または、アプリのプロセスが止まっている | 数秒待ってから再実行する。続く場合は、新しい MicroVM を起動する |
