@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- ハンズオン全体の構成図（README の冒頭・記事の「ハンズオンはこちら！」）。
+     左: あなたが AWS CloudShell で実行するコマンドと、その宛先。右: 東京リージョンで使う AWS のリソース。
+     根拠:
+     - aws s3 cp で app.zip（Dockerfile と server.py）を S3 にアップロードする（公式チュートリアル Create your first Lambda MicroVM）
+     - aws lambda-microvms の API: CreateMicrovmImage・RunMicrovm・CreateMicrovmAuthToken・SuspendMicrovm・ResumeMicrovm・TerminateMicrovm
+       （botocore lambda-microvms/2025-09-09/service-2.json）。手順の番号は README の章立て
+     - イメージの作成中、Lambda はビルド用ロールで S3 から zip を読み込み、イメージの作成のログを書く（CreateMicrovmImageRequest.buildRoleArn、docs microvms-security）
+     - MicroVM の実行中、Lambda は実行用ロールで実行のログを書く（RunMicrovmRequest.executionRoleArn、docs microvms-monitoring）
+       2 つのロールの信頼ポリシーのプリンシパルは lambda.amazonaws.com。そのため「Lambda が引き受ける」と書く
+       ロールの許可は hands-on/setup.sh のインラインポリシーのとおり。ビルド用ロール: s3:GetObject・s3:GetObjectVersion（バケットの中）と
+       logs:CreateLogGroup・CreateLogStream・PutLogEvents。実行用ロール: logs の 3 つだけ
+       ログの線は、イメージの作成と実行の両方のログを表すため、MicroVM の箱ではなく AWS Lambda MicroVMs の枠から引く
+       表記: 「作成中」「実行中」と、ロググループの説明の「イメージの作成と実行のログ」は、README の setup.sh の表と同じ言い方
+     - MicroVM はイメージのスナップショットから起動する（docs microvms-how-it-works）
+     - MicroVM ごとに HTTPS のエンドポイントがあり、リクエストには X-aws-proxy-auth の認証トークンが必要
+       （RunMicrovmResponse.endpoint、CreateMicrovmAuthTokenResponse、docs microvms-launching）
+     - 手順 7 の sandbox.py（hands-on/sandbox.py）は、boto3 で RunMicrovm・GetMicrovm・CreateMicrovmAuthToken・SuspendMicrovm・ResumeMicrovm・
+       TerminateMicrovm を呼び出し、生成されたコードを POST /exec でエンドポイントに送る（Sandbox クラスの run・token・exec_code）。
+       Amazon Bedrock は ask_ai だけが呼び出す（Converse API、モデル amazon.nova-2-lite-v1:0）。
+       手順 7 の 3 本の点線は、上から、Lambda MicroVMs の API の呼び出し（README の手順 7 の表）、エンドポイントへのリクエスト、Bedrock の呼び出し。
+       README は、記事の「管理用のアプリ」に当たるのは CloudShell で実行する AWS CLI と手順 7 の sandbox.py だと書いている。
+       そのため、sandbox.py からも AWS Lambda MicroVMs の枠へ線を引く（aws lambda-microvms の線と同じく、宛先はサービスの枠）
+     - IAM はグローバルなサービスのため、ロールはリージョンの枠の外、AWS Cloud の枠の中に置く
+     - 左の 4 つの箱は「何をするか」と「実行するコマンド」。線の上の「手順 N」は README の手順の番号
+     線はすべて水平か垂直で、線どうしは交わらない。各箱の出口と宛先の中心の高さ、S3・イメージ・MicroVM・ログの中心の横位置（x=652）をそろえている。
+     エンドポイントには、左辺に curl（y=464）の線、下辺の中央（x=488）に sandbox.py の線が入る。
+     sandbox.py の API の線（y=566）は、curl の線より下で枠の左辺に入れるため、枠の下端を y=590 まで延ばし、MicroVM とエンドポイントの下を空けている。
+     sandbox.py のエンドポイントの線（y=608）は、枠の下を通ってエンドポイントの下辺に上がる。Bedrock とログは、その線より下（アイコンの上端 y=634）に置く -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 890px; }
+
+  /* 左: あなたの操作（灰色の点線） */
+  .lane.you { left: 0; top: 0; width: 232px; height: 890px; }
+  .cs { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 900; }
+  .cs img { width: 36px; height: 36px; }
+  .cs-sub { position: absolute; left: 12px; top: 54px; font-size: 16px; font-weight: 500; }
+  .port { position: absolute; left: 10px; width: 212px; height: 62px; border: 2px solid var(--ink); background: #fff; padding: 5px 8px; }
+  .port b { display: block; font-size: 17px; font-weight: 900; line-height: 1.35; white-space: nowrap; }
+  .port code { display: block; font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1.45; white-space: nowrap; }
+  .pt { position: absolute; width: 0; height: 1px; }
+
+  /* 右: AWS の枠 */
+  .grp { position: absolute; border: 2px solid #242f3e; }
+  .grp.region { border: 2px dashed #00a4a6; }
+  .grp.svc { border: 2px solid var(--ink); }
+  .grp > .gl { position: absolute; left: -2px; top: -2px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .grp > .gl img { width: 32px; height: 32px; }
+  /* 枠の名前はコードではないため、図の文字の下限の 16px にする */
+  .grp > .gl .en { font-family: var(--font-mono); font-weight: 800; font-size: 16px; letter-spacing: .04em; }
+  .grp > .gl .ja { font-size: 16px; font-weight: 900; }
+  .grp > .gl .code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; color: var(--grey); }
+
+  .vm { position: absolute; border: 3px solid var(--ink); background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .vm b { font-size: 18px; font-weight: 900; line-height: 1.3; }
+  .vm span { font-size: 16px; font-weight: 500; line-height: 1.4; margin-top: 2px; }
+  .vm code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+  .ep { position: absolute; border: 2px solid var(--ink); background: #fff; font-size: 17px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+
+  .role { position: absolute; display: flex; align-items: flex-start; gap: 8px; }
+  .role img { width: 40px; height: 40px; margin-top: 4px; }
+  .role b { display: block; font-size: 17px; font-weight: 900; line-height: 1.3; }
+  .role span { display: block; font-size: 16px; font-weight: 500; line-height: 1.3; color: #4a4843; white-space: nowrap; }
+  .role span + span { margin-top: 4px; }
+  .node.wide { width: 225px; }
+  /* 線の説明は本文と同じ黒にする（灰色は薄く読みにくいため） */
+  .lbl.ink { color: var(--ink); }
+  .lbl.step { color: var(--ink); font-weight: 900; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <!-- あなた: CloudShell で実行するコマンド。右端から、そのコマンドの宛先へ線を引く -->
+  <div class="lane you"></div>
+  <div class="cs"><img src="../icons/AWSCloudShell.svg">AWS CloudShell</div>
+  <div class="cs-sub">あなたがコマンドを実行</div>
+  <div class="port" id="p1" data-self="1" style="top:89px"><b>zip をアップロード</b><code>aws s3 cp</code></div>
+  <div class="port" id="p2" data-self="1" style="top:225px"><b>API を呼び出す</b><code>aws lambda-microvms</code></div>
+  <div class="port" id="p3" data-self="1" style="top:433px"><b>認証トークンでアクセス</b><code>curl</code></div>
+  <!-- 手順 7: 上の出口（y=566）から AWS Lambda MicroVMs の枠へ、中の出口（y=608）からエンドポイントへ、下の出口（y=662）から Bedrock へ -->
+  <div class="port" id="p4" style="top:548px;height:132px;display:flex;flex-direction:column;justify-content:center"><b>AI が生成したコードを<br>MicroVM で実行</b><code>python3 sandbox.py</code></div>
+  <div class="pt" id="p4a" data-self="1" style="left:222px;top:565.5px"></div>
+  <div class="pt" id="p4e" data-self="1" style="left:222px;top:607.5px"></div>
+  <div class="pt" id="p4b" data-self="1" style="left:222px;top:661.5px"></div>
+
+  <!-- AWS Cloud > 東京リージョン > AWS Lambda MicroVMs -->
+  <div class="grp" style="left:248px;top:0;width:552px;height:890px">
+    <div class="gl"><img src="../icons/AWSCloudlogo.svg"><span class="en">AWS Cloud</span></div>
+  </div>
+  <div class="grp region" style="left:262px;top:46px;width:524px;height:708px">
+    <div class="gl"><img src="../icons/Region.svg"><span class="ja">東京リージョン</span><span class="code">ap-northeast-1</span></div>
+  </div>
+  <!-- 枠の下端は y=590。MicroVM とエンドポイントの下（y=500〜590）を空け、sandbox.py の API の線（y=566）を左辺に入れる -->
+  <div class="grp svc" id="lmvg" style="left:400px;top:240px;width:372px;height:350px">
+    <div class="gl"><img id="lmv" data-self="1" src="../icons/AWSLambda.svg"><span class="en">AWS Lambda MicroVMs</span></div>
+  </div>
+  <div class="pt" id="lmvL" data-self="1" style="left:400px;top:565.5px"></div>
+
+  <div class="node" id="s3" style="left:577px;top:92px"><img src="../icons/AmazonSimpleStorageService.svg"><div class="t">Amazon S3</div><div class="s">app.zip</div></div>
+  <div class="lbl ink" style="left:343px;top:206px">イメージの作成中に Lambda が読み込む</div>
+  <div class="vm" id="img" style="left:552px;top:284px;width:200px;height:92px"><b>MicroVM イメージ</b><span>メモリとディスクの<br>スナップショット</span></div>
+  <div class="lbl ink" style="left:410px;top:390px">スナップショットから起動する</div>
+  <div class="vm" id="vm" style="left:552px;top:428px;width:200px;height:72px"><b>MicroVM</b><span><code>server.py</code> が動作する</span></div>
+  <!-- エンドポイントには、左辺（y=464）に curl の線、下辺の中央（x=488）に sandbox.py の線が入る -->
+  <div class="ep" id="ep" style="left:422px;top:448px;width:132px;height:52px">エンドポイント</div>
+  <div class="pt" id="epA" data-self="1" style="left:422px;top:463.5px"></div>
+
+  <div class="node" id="br" style="left:380px;top:634px"><img src="../icons/AmazonBedrock.svg"><div class="t">Amazon Bedrock</div><div class="s">AI がコードを生成</div></div>
+  <div class="node wide" id="logs" style="left:539.5px;top:634px"><img src="../icons/AmazonCloudWatch.svg"><div class="t">Amazon CloudWatch Logs</div><div class="s">イメージの作成と実行のログ</div></div>
+  <div class="pt" id="lg" data-self="1" style="left:652px;top:589px"></div>
+
+  <!-- 手順の番号（README の章立て。README の番号が変わったら、ここも直す） -->
+  <div class="lbl step" style="left:286px;top:109px">手順 2</div>
+  <div class="lbl step" style="left:286px;top:245px">手順 2〜6</div>
+  <div class="lbl step" style="left:286px;top:453px">手順 4〜6</div>
+  <div class="lbl step" style="left:286px;top:555px">手順 7</div>
+  <div class="lbl step" style="left:286px;top:597px">手順 7</div>
+  <div class="lbl step" style="left:286px;top:651px">手順 7</div>
+
+  <!-- IAM はグローバルなサービスのため、リージョンの外に置く。許可の内容は hands-on/setup.sh のインラインポリシー -->
+  <div class="role" style="left:264px;top:770px"><img src="../icons/AWSIdentityAccessManagementRole.svg"><div><b>ビルド用ロール</b><span>イメージの作成中に<br>Lambda が引き受ける。</span><span>S3 の読み取りと<br>ログの書き込みを許可する。</span></div></div>
+  <div class="role" style="left:566px;top:770px"><img src="../icons/AWSIdentityAccessManagementRole.svg"><div><b>実行用ロール</b><span>MicroVM の実行中に<br>Lambda が引き受ける。</span><span>ログの書き込みだけを<br>許可する。</span></div></div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#p1', '#s3', {});
+  wire('#p2', '#lmv', {});
+  wire('#p3', '#epA', {});
+  // 手順 7: sandbox.py から、AWS Lambda MicroVMs の枠の左辺へ（API の呼び出し）
+  wire('#p4a', '#lmvL', {dash: true});
+  // 手順 7: sandbox.py からエンドポイントへ。枠の下を通り、x=488 で上に折れて、エンドポイントの下辺に入る
+  wire('#p4e', '#ep', {to: 'b', elbow: 'h', dash: true});
+  wire('#p4b', '#br', {dash: true});
+  wire('#s3', '#img', {from: 'b', to: 't'});
+  wire('#img', '#vm', {from: 'b', to: 't'});
+  wire('#lg', '#logs', {from: 'b', to: 't'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>

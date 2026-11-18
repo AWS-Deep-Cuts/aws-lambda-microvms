@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- snapshot-random: 同じ MicroVM イメージから起動した 2 台の MicroVM で、GET /random の応答を比べる（記事「同じイメージから起動した MicroVM の注意点」・README 手順 6）。
+     左はスナップショットの内容。server.py のプロセスの中の値（boot_id、random モジュールの内部状態、ready フックの記録）と、カーネルの乱数生成器。
+     右は 2 台の応答の例。値は説明用の例で、キーと形は hands-on/app/server.py の /random（json.dumps の indent=2）と同じ。
+     差し色は「2 台で同じ値になるもの」だけに使う（スナップショットの中の boot_id と random の内部状態、応答の boot_id と random_random の行、左下の説明）。
+     右上の見出しでは、差し色の行を「色を付けた行」と呼ぶ（「色を付けた行は 2 台で同じ値になる」）。
+     根拠:
+     - server.py: BOOT_ID = str(uuid.uuid4()) はプロセスの起動時（イメージの作成中）に 1 回だけ生成する。/random は random.random()、os.urandom(8).hex()、str(uuid.uuid4()) を返す。
+       Python の random モジュールは import 時に内部状態を初期化する。uuid.uuid4() は呼び出すたびに os.urandom(16) を使う
+     - "Content such as unique IDs, secrets, or network connections generated during the build is shared across all MicroVMs from the same image version,
+       so generate it after the MicroVM starts instead."（docs microvms-best-practices、factsheet 091）
+     - 公式 skill aws-lambda-microvms の references/snapshots-and-uniqueness.md: Python は secrets か random.SystemRandom を使い、既定のシードの random.random() は使わない。
+       MicroVM ごとに異なるべき値は run フックで生成する。"the kernel RNG reseeds on resume"（カーネルの乱数生成器は、復元のたびにシードを更新する）
+     - Firecracker の docs/snapshotting/random-for-clones.md: VMGenID で復元をゲストに通知し、通知に対応したカーネルは乱数生成器のシードを新しい値で更新する
+       （ACPI のシステムでは Linux 5.18 以降。ARM64 で使う DeviceTree への対応は Linux 6.10 からで、Firecracker は 6.1 に取り込んで使う。reseed。
+       Linux の add_vmfork_randomness → crng_reseed。乱数生成器を作り直すのではない）。記事と README の手順 6 の「乱数生成器のシードを新しい値で更新する」と同じ表現。
+       シードは、乱数生成器が生成する値の並びを決める元の値（記事・README と同じ定義）
+       "State other than the guest kernel entropy pool, such as unique identifiers, cached random numbers, cryptographic tokens, etc will still be replicated"（factsheet R1-17）
+       MicroVM のカーネルについては、公式 skill の "the kernel RNG reseeds on resume" を根拠に、右下の説明を言い切る（記事も Agent Skill の記述で説明している）
+     設計書との違い: スナップショットの内容に「カーネルの乱数生成器」を足した（右下の説明と対応させるため）。助言「MicroVM ごとに異なるべき乱数の値は
+     run フックのあとに secrets モジュールで生成する」は、2 つの説明の下の帯に分けた。「異なるべき値」は記事・README と同じ言い方。
+     帯の対象は「乱数の値」に限る。Agent Skill（snapshots-and-uniqueness.md）は、MicroVM ごとの値の作り方として、run フックで生成する方法、
+     CSPRNG（Python では secrets）から読む方法、runHookPayload で渡す方法を挙げ、秘密情報は実行用ロールで Secrets Manager などから取得するとしている。
+     記事は「run フックで値を受け取る方法」と「起動後に暗号論的に安全な乱数生成器で作成する方法」、README は「乱数から値を生成する方法として」secrets を挙げる。
+     そのため、秘密情報のような値まで secrets で生成すると読めないようにする。値の例は、README の手順 6 と同じく、各 MicroVM に GET /random を 1 回ずつ送った場合。
+     「2 台で同じ」は、2 台が同じビルドのスナップショットから復元された場合（記事・README の手順 6 の注記のとおり、ビルドが複数あると異なる）。
+     そのため左の箱の下端に「このスナップショットから 2 台の MicroVM を復元する」と書く。
+     表記: フックの名前は記事・README と同じく「ready フック」「run フック」と書く。説明の文は、すべて「。」で終える。
+     見出しと箱の題と下の帯の文には読点を使わない
+     線は MicroVM イメージから 2 台への分岐だけで、すべて水平か垂直 -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 708px; }
+  code { font-family: var(--font-mono); font-weight: 800; font-size: 15px; }
+
+  /* MicroVM イメージ：スナップショットの内容 */
+  .img { position: absolute; border: 3px solid var(--ink); background: #fff; display: flex; flex-direction: column; }
+  .img > .h { background: var(--ink); color: #fff; font-size: 17px; font-weight: 900; padding: 6px 12px; line-height: 1.45; }
+  .img > .sub { padding: 10px 12px 0; font-size: 16px; font-weight: 700; color: var(--grey); line-height: 1.45; }
+  .proc { margin: 8px 12px 0; border: 2px solid var(--ink); }
+  .proc > div { font-size: 16px; font-weight: 700; padding: 5px 10px; line-height: 1.4; }
+  .proc > .ph { font-weight: 900; border-bottom: 2px solid var(--ink); background: var(--bone); }
+  .proc > div + div:not(.ph) { border-top: 1px solid var(--line); }
+  .proc > .ph + div { border-top: 0 !important; }
+  .proc > .hot { color: var(--hot); font-weight: 900; }
+  .proc code.v { font-weight: 500; }
+  .kern { margin: 10px 12px 0; border: 2px solid var(--grey); padding: 5px 10px; font-size: 16px; font-weight: 700; line-height: 1.4; }
+  .img > .foot { margin-top: auto; padding: 8px 12px; font-size: 16px; font-weight: 700; line-height: 1.45; border-top: 2px solid var(--ink); background: var(--bone); }
+
+  /* GET /random の応答。色を付けた行は 2 台で同じ値 */
+  .rowl code { font-size: 16px; }
+  .vm { position: absolute; border: 3px solid var(--ink); background: #fff; }
+  .vm > .h { background: var(--ink); color: #fff; font-size: 17px; font-weight: 900; padding: 6px 12px; line-height: 1.45; }
+  .vm > .json { padding: 8px 0; font-family: var(--font-mono); font-weight: 500; font-size: 15px; line-height: 1.5; white-space: pre; }
+  .vm > .json > span { display: block; padding: 0 12px; }
+  .vm > .json > span.same { background: #ffe9df; }
+  .vm > .json > span.same b { color: var(--hot); font-weight: 800; }
+
+  /* 下の説明 */
+  .note { position: absolute; border: 3px solid var(--ink); background: #fff; padding: 10px 14px; }
+  .note.hot { border-color: var(--hot); }
+  .note > b { display: block; font-size: 17px; font-weight: 900; line-height: 1.45; }
+  .note.hot > b { color: var(--hot); }
+  .note > span { display: block; margin-top: 6px; font-size: 16px; font-weight: 500; line-height: 1.5; }
+  .fix { position: absolute; background: var(--ink); color: #fff; display: flex; align-items: center; gap: 12px; padding: 0 14px; font-size: 17px; font-weight: 900; white-space: nowrap; }
+  .fix > i { font-style: normal; background: #fff; color: var(--ink); font-size: 16px; font-weight: 900; line-height: 26px; padding: 0 8px; }
+  .fix code { font-size: 16px; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <!-- 左：MicroVM イメージ。中心の高さ（y=240）から、2 台の MicroVM に線を分ける -->
+  <div class="img" id="img" style="left:0;top:34px;width:250px;height:412px">
+    <div class="h">MicroVM イメージ</div>
+    <div class="sub">スナップショットの内容</div>
+    <div class="proc">
+      <div class="ph">server.py のプロセス</div>
+      <div class="hot"><code>boot_id</code> の値<br><code class="v">"6f1c2e4a-9d3b-…"</code></div>
+      <div class="hot"><code>random</code> モジュールの<br>内部状態</div>
+      <div><code>ready</code> フックの記録</div>
+    </div>
+    <div class="kern">カーネルの乱数生成器</div>
+    <div class="foot">Lambda は、<br>このスナップショットから<br>2 台の MicroVM を復元する</div>
+  </div>
+
+  <!-- 右：2 台の GET /random の応答の例 -->
+  <div class="rowl" style="left:296px;top:4px"><code>GET /random</code> の応答の例 <em>・ 色を付けた行は 2 台で同じ値になる</em></div>
+
+  <div class="vm" id="vA" style="left:296px;top:34px;width:504px;height:194px">
+    <div class="h">MicroVM A</div>
+<div class="json"><span>{</span><span class="same">  "boot_id": <b>"6f1c2e4a-9d3b-4c1e-8a57-2b9e0d4f7a13"</b>,</span><span class="same">  "random_random": <b>0.5724637192731634</b>,</span><span>  "os_urandom_hex": "3fa2c9d41b7e0856",</span><span>  "uuid4": "1b4e28ba-2fa1-41d2-883f-0016d3cca427"</span><span>}</span></div>
+  </div>
+  <div class="vm" id="vB" style="left:296px;top:252px;width:504px;height:194px">
+    <div class="h">MicroVM B</div>
+<div class="json"><span>{</span><span class="same">  "boot_id": <b>"6f1c2e4a-9d3b-4c1e-8a57-2b9e0d4f7a13"</b>,</span><span class="same">  "random_random": <b>0.5724637192731634</b>,</span><span>  "os_urandom_hex": "9b07e1a25c3d4f68",</span><span>  "uuid4": "c7d3f019-6a2e-4b85-9e14-7f50a2b3c8d1"</span><span>}</span></div>
+  </div>
+
+  <!-- 下：同じになる理由と、異なる理由。いちばん下に対策 -->
+  <div class="note hot" id="n1" style="left:0;top:470px;width:392px;height:178px">
+    <b>プロセスの中の値は 2 台で同じになる</b>
+    <span><code>boot_id</code> と <code>random</code> モジュールの内部状態は、<br>イメージの作成中に生成され、<br>スナップショットに含まれる。</span>
+  </div>
+  <div class="note" id="n2" style="left:408px;top:470px;width:392px;height:178px">
+    <b>カーネルから取得した乱数は 2 台で異なる</b>
+    <span><code>os.urandom()</code> と <code>uuid4()</code> は、呼び出すたびに<br>カーネルの乱数生成器から値を取得する。<br>Firecracker が復元をカーネルに通知し、<br>カーネルが乱数生成器のシードを<br>新しい値で更新する。</span>
+  </div>
+  <div class="fix" style="left:0;top:660px;width:800px;height:46px"><i>対策</i><span>MicroVM ごとに異なるべき乱数の値は <code>run</code> フックのあとに <code>secrets</code> モジュールで生成する</span></div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#img', '#vA', {from: 'r', to: 'l', elbow: 'hv'});
+  wire('#img', '#vB', {from: 'r', to: 'l', elbow: 'hv'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>

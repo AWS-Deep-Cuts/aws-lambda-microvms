@@ -1,0 +1,17 @@
+{
+  "port": 9000,
+  "microvmImageHooks": {
+    "ready": "ENABLED",
+    "readyTimeoutInSeconds": 60
+  },
+  "microvmHooks": {
+    "run": "ENABLED",
+    "runTimeoutInSeconds": 10,
+    "suspend": "ENABLED",
+    "suspendTimeoutInSeconds": 10,
+    "resume": "ENABLED",
+    "resumeTimeoutInSeconds": 10,
+    "terminate": "ENABLED",
+    "terminateTimeoutInSeconds": 10
+  }
+}

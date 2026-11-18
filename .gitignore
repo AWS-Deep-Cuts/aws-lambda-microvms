@@ -1,0 +1,9 @@
+resource-ids.env
+app.zip
+hands-on/output/
+hands-on/.sandbox-state.json
+__pycache__/
+*.pyc
+
+# 図の書き出し用の依存（img/src で npm install したもの）
+node_modules

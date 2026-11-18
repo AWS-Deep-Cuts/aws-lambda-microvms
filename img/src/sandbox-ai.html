@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<!-- sandbox-ai: sandbox.py で :ai を実行したときに起きること（README 手順 7）。
+     何をモデルに渡し、何を渡していないか。生成されたコードは、あなたが確認して y を入力したときだけ MicroVM で実行される。
+     上から「あなたが行う操作」「sandbox.py が行う処理」（CloudShell で実行）「AWS が自動で行う処理」の 3 つの枠。番号は処理の順序。
+     根拠（hands-on/sandbox.py）:
+     - ask_ai: boto3 の bedrock-runtime クライアントで converse を呼び出す。modelId は amazon.nova-2-lite-v1:0（DEFAULT_MODEL）。
+       system=[SYSTEM_PROMPT]（"Reply with ONLY one Python 3 code block ..."）、
+       messages=[{role: user, あなたの依頼}, {role: assistant, "```python\n"}]、
+       inferenceConfig={maxTokens: 1500, temperature: 0.2, stopSequences: ["```"]}。モデルへの入力はこれだけで、下の表の 6 行がすべて
+     - cmd_ai: 生成されたコードに行番号を付けて表示し、"このコードを MicroVM の中で実行しますか？ [y/N]" に y が入力されたときだけ
+       exec_code を呼び出す。y 以外なら "実行しませんでした"
+     - exec_code / call: MicroVM のエンドポイントに POST /exec を送る。ヘッダーは X-aws-proxy-auth（CreateMicrovmAuthToken の認証トークン）と
+       X-aws-proxy-port 8080。本文は {"code": "..."}
+     - hands-on/app/server.py の do_POST: /exec で受け取ったコードをプロセス内の共通の名前空間で実行し、stdout・error・vars を返す
+     - 認証トークンとエンドポイントは Sandbox クラスの中だけで使い、ask_ai には渡さない。ファイルも読み込まない
+     表記: 利用者の入力は README と同じく「依頼」と呼ぶ（1 の「依頼を入力する」、表の「あなたの依頼」）。maxTokens は「出力するトークン数の上限」と書く。
+     この「トークン」はモデルが扱う文章の量の単位で、認証トークンとは別のもの（README の手順 7 の説明と同じ）。
+     下の表の項目名が長いため、左のカードを 496px、右のカードを 284px にしている。
+     カードの見出しは「Bedrock に」ではなく「Nova 2 Lite に」とした。Bedrock の API へのリクエストには、ほかの AWS API と同じく
+     SigV4 の署名（アクセスキー ID とセッショントークン）が付くため。モデルへの入力には、認証情報は含まれない。
+     枠の名前は image-build と request-flow の「あなたが行う操作」「AWS が自動で行う処理」に合わせた。ここでの AWS の処理は sandbox.py の
+     呼び出しに応じて行われるが、image-build・request-flow と同じ種類の枠のため「AWS が自動で行う処理」にそろえた。1→2→3 の縦の矢印は、枠の名前に重ならないよう x=250 に引く -->
+<link rel="stylesheet" href="diagram.css">
+<link rel="stylesheet" href="deepcuts.css">
+<script src="wires.js"></script>
+<style>
+  #fig { width: 800px; height: 808px; }
+  .lane > .lt { display: flex; align-items: center; gap: 8px; top: 6px; }
+  .lane > .lt img { width: 26px; height: 26px; }
+  .lane.prog { border-style: solid; border-color: var(--grey); }
+  .st { height: 124px; }
+  .st > b { line-height: 1.3; }
+  .st > span { line-height: 1.4; }
+  .st > img { width: 30px; height: 30px; }
+  .st code.req { font-size: 15px; font-weight: 800; line-height: 1.5; }
+  .lbl.k { color: var(--ink); }
+
+  /* 下の 2 枚のカード */
+  .kv { width: 100%; border-collapse: collapse; }
+  .kv td { padding: 5px 12px; border-top: 1.5px solid var(--line); vertical-align: baseline; line-height: 1.4; white-space: nowrap; }
+  .kv tr:first-child td { border-top: 0; }
+  .kv td.k { font-size: 16px; font-weight: 900; width: 216px; }
+  .kv td.v { font-size: 16px; font-weight: 500; }
+  .kv td.v code { font-family: var(--font-mono); font-weight: 800; font-size: 18px; letter-spacing: .06em; background: var(--bone); border: 1.5px solid var(--line); padding: 0 6px; }
+  .kv td.v code.name { font-size: 15px; letter-spacing: 0; background: none; border: 0; padding: 0; margin-right: 6px; }
+  .no { list-style: none; margin: 0; padding: 2px 14px 6px; }
+  .no li { font-size: 17px; font-weight: 700; line-height: 1.4; padding: 7px 0; border-top: 1.5px solid var(--line); }
+  .no li:first-child { border-top: 0; }
+</style>
+</head><body>
+<div id="fig">
+  <svg id="wires"></svg>
+
+  <div class="lane" style="left:0;top:0;width:800px;height:168px"><span class="lt"><img src="../icons/User.svg">あなたが行う操作</span></div>
+  <div class="lane prog" style="left:0;top:184px;width:800px;height:168px"><span class="lt"><img src="../icons/AWSCloudShell.svg">sandbox.py が行う処理</span></div>
+  <div class="lane aws" style="left:0;top:368px;width:800px;height:168px"><span class="lt"><img src="../icons/AWSCloudlogo.svg">AWS が自動で行う処理</span></div>
+
+  <!-- あなた -->
+  <div class="st" data-self="1" id="s1" style="left:16px;top:34px;width:272px"><i>1</i><b>依頼を入力する</b><span><code class="req">:ai 1 から 100 までの<br>素数を表示して</code></span></div>
+  <div class="st hot" data-self="1" id="s5" style="left:308px;top:34px;width:212px"><i>5</i><b>コードを確認して<br>y を入力する</b><span>y 以外なら実行されない</span></div>
+
+  <!-- sandbox.py -->
+  <div class="st" data-self="1" id="s2" style="left:16px;top:218px;width:272px"><i>2</i><b>Converse API を呼び出す</b><span>Nova 2 Lite に、<br>下の表の入力だけを送る</span></div>
+  <div class="st" data-self="1" id="s4" style="left:308px;top:218px;width:212px"><i>4</i><b>コードを表示する</b><span>実行してよいか、<br>あなたの確認を待つ</span></div>
+  <div class="st" data-self="1" id="s6" style="left:540px;top:218px;width:244px"><i>6</i><b>POST /exec でコードを<br>MicroVM に送る</b><span>受け取った結果を表示する</span></div>
+
+  <!-- AWS -->
+  <div class="st" data-self="1" id="s3" style="left:16px;top:402px;width:272px"><img src="../icons/AmazonBedrock.svg"><i>3</i><b>Python のコードを返す</b><span>Amazon Bedrock の<br>Nova 2 Lite が生成する</span></div>
+  <div class="st" data-self="1" id="s7" style="left:540px;top:402px;width:244px"><img src="../icons/AWSLambda.svg"><i>7</i><b>コードを実行する</b><span>MicroVM の中の server.py が<br>実行して、結果を返す</span></div>
+
+  <!-- 1→2 と 2→3 の矢印の端点（x=250。枠の名前を避ける） -->
+  <div id="a1" data-self="1" style="position:absolute;left:249.5px;top:157px;width:1px;height:1px"></div>
+  <div id="a2" data-self="1" style="position:absolute;left:249.5px;top:218px;width:1px;height:1px"></div>
+  <div id="a3" data-self="1" style="position:absolute;left:249.5px;top:341px;width:1px;height:1px"></div>
+  <div id="a4" data-self="1" style="position:absolute;left:249.5px;top:402px;width:1px;height:1px"></div>
+
+  <!-- 6 と 7 の間の 2 本の矢印の端点 -->
+  <div id="p6a" data-self="1" style="position:absolute;left:622px;top:342px;width:1px;height:1px"></div>
+  <div id="p7a" data-self="1" style="position:absolute;left:622px;top:402px;width:1px;height:1px"></div>
+  <div id="p7b" data-self="1" style="position:absolute;left:702px;top:402px;width:1px;height:1px"></div>
+  <div id="p6b" data-self="1" style="position:absolute;left:702px;top:342px;width:1px;height:1px"></div>
+  <div class="lbl k" style="left:558px;top:373px">コード</div>
+  <div class="lbl k" style="left:710px;top:373px">結果</div>
+
+  <!-- 下のカード -->
+  <div class="card" style="left:0;top:558px;width:496px;height:250px">
+    <div class="h">Nova 2 Lite に渡すもの ・ Converse API の入力</div>
+    <table class="kv">
+      <tr><td class="k">システムプロンプト</td><td class="v">Python のコードだけを返す指示</td></tr>
+      <tr><td class="k">あなたの依頼</td><td class="v">1 から 100 までの素数を表示して</td></tr>
+      <tr><td class="k">応答の書き出し</td><td class="v"><code>```python</code></td></tr>
+      <tr><td class="k">出力するトークン数の上限</td><td class="v">1,500</td></tr>
+      <tr><td class="k">出力のばらつき</td><td class="v"><code class="name">temperature</code>0.2</td></tr>
+      <tr><td class="k">出力を止める文字列</td><td class="v"><code>```</code></td></tr>
+    </table>
+  </div>
+  <div class="card hot" style="left:516px;top:558px;width:284px;height:250px">
+    <div class="h">Nova 2 Lite に渡していないもの</div>
+    <ul class="no">
+      <li>AWS の認証情報</li>
+      <li>CloudShell のファイル</li>
+      <li>MicroVM のエンドポイントと<br>認証トークン</li>
+    </ul>
+  </div>
+</div>
+<script>
+window.addEventListener('load', async () => { await document.fonts.ready;
+  wire('#a1', '#a2', {from: 'b', to: 't'});
+  wire('#a3', '#a4', {from: 'b', to: 't'});
+  wire('#s3', '#s4', {from: 'r', to: 'b', elbow: 'h'});
+  wire('#s4', '#s5', {from: 't', to: 'b'});
+  wire('#s5', '#s6', {from: 'r', to: 't', elbow: 'h'});
+  wire('#p6a', '#p7a', {from: 'b', to: 't'});
+  wire('#p7b', '#p6b', {from: 't', to: 'b'});
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>
